@@ -102,6 +102,10 @@ const Cargo = sequelize.define('cargo', {
       name: 'idx_cargos_asoc_periodo',
       fields: ['id_asociacion', 'periodo'],
     },
+    {
+      name: 'idx_cargos_origen',
+      fields: ['tipo_origen', 'id_referencia_origen'],
+    },
   ],
 });
 

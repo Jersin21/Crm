@@ -8,8 +8,17 @@ const { Ingreso, IngresoDetalle, Cargo, Socio, Usuario, Asociacion, ConceptoCobr
 const createIngreso = async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.body.id_asociacion || req.query.id_asociacion)
+        ? req.body.id_asociacion || req.query.id_asociacion
+        : req.user.id_asociacion;
     const id_usuario = req.user.id_usuario;
+
+    if (!id_asociacion) {
+      await t.rollback();
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const { id_socio, cargos: cargosAbono, monto_total_recibido, fecha_pago, observacion } = req.body;
 
     const fechaPagoEfectiva = fecha_pago ? new Date(fecha_pago) : new Date();
@@ -118,44 +127,52 @@ const createIngreso = async (req, res, next) => {
     }
 
     const totalCobroServidor = Math.round((sumaCapitalCalculada + sumaMoraCalculada) * 100) / 100;
-    const montoFinalRecibido = monto_total_recibido !== undefined && !isNaN(parseFloat(monto_total_recibido))
-      ? Math.round(parseFloat(monto_total_recibido) * 100) / 100
-      : totalCobroServidor;
+    const montoFinalRecibido =
+      monto_total_recibido !== undefined && !isNaN(parseFloat(monto_total_recibido))
+        ? Math.round(parseFloat(monto_total_recibido) * 100) / 100
+        : totalCobroServidor;
 
     // 4. Crear el comprobante principal de Ingreso
-    const ingreso = await Ingreso.create({
-      id_asociacion,
-      nro_recibo,
-      id_socio,
-      id_usuario,
-      monto_total_recibido: montoFinalRecibido,
-      fecha_pago: fechaPagoEfectiva,
-      estado: 'Valido',
-      observacion: observacion ? String(observacion).trim() : null,
-      created_at: new Date(),
-      updated_at: new Date(),
-    }, { transaction: t });
+    const ingreso = await Ingreso.create(
+      {
+        id_asociacion,
+        nro_recibo,
+        id_socio,
+        id_usuario,
+        monto_total_recibido: montoFinalRecibido,
+        fecha_pago: fechaPagoEfectiva,
+        estado: 'Valido',
+        observacion: observacion ? String(observacion).trim() : null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      { transaction: t }
+    );
 
-    // 5. Insertar los detalles vinculados
-    for (const det of detallesParaInsertar) {
-      await IngresoDetalle.create({
+    // 5. Insertar los detalles vinculados de alto rendimiento
+    if (detallesParaInsertar.length > 0) {
+      const itemsConIdIngreso = detallesParaInsertar.map((det) => ({
         id_ingreso: ingreso.id_ingreso,
         id_cargo: det.id_cargo,
         monto_abonado_capital: det.monto_abonado_capital,
         monto_abonado_mora: det.monto_abonado_mora,
         created_at: new Date(),
         updated_at: new Date(),
-      }, { transaction: t });
+      }));
+      await IngresoDetalle.bulkCreate(itemsConIdIngreso, { transaction: t });
     }
 
     // 6. Aplicar las actualizaciones a los cargos bloqueados
     for (const item of cargosParaActualizar) {
-      await item.cargo.update({
-        saldo_capital_pendiente: item.nuevoSaldoCapital.toFixed(2),
-        monto_mora_acumulada: item.nuevaMora.toFixed(2),
-        estado: item.nuevoEstado,
-        updated_at: new Date(),
-      }, { transaction: t });
+      await item.cargo.update(
+        {
+          saldo_capital_pendiente: item.nuevoSaldoCapital.toFixed(2),
+          monto_mora_acumulada: item.nuevaMora.toFixed(2),
+          estado: item.nuevoEstado,
+          updated_at: new Date(),
+        },
+        { transaction: t }
+      );
     }
 
     await t.commit();
@@ -168,7 +185,8 @@ const createIngreso = async (req, res, next) => {
         { model: Socio, as: 'socio', include: [{ model: Persona, as: 'persona' }] },
         { model: Usuario, as: 'cajero', attributes: { exclude: ['password'] } },
         {
-          model: IngresoDetalle, as: 'detalles',
+          model: IngresoDetalle,
+          as: 'detalles',
           include: [{ model: Cargo, as: 'cargo', include: [{ model: ConceptoCobro, as: 'concepto' }] }],
         },
       ],
@@ -192,8 +210,17 @@ const createIngreso = async (req, res, next) => {
 const createIngresoDirecto = async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.body.id_asociacion || req.query.id_asociacion)
+        ? req.body.id_asociacion || req.query.id_asociacion
+        : req.user.id_asociacion;
     const id_usuario = req.user.id_usuario;
+
+    if (!id_asociacion) {
+      await t.rollback();
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     let id_socio = req.body.id_socio;
     const {
       monto,
@@ -249,34 +276,47 @@ const createIngresoDirecto = async (req, res, next) => {
         if (nuevo_socio_ci && nuevo_socio_ci.trim()) {
           personaNueva = await Persona.findOne({
             where: { ci: nuevo_socio_ci.trim() },
+            paranoid: false,
             transaction: t,
           });
         }
 
         if (!personaNueva) {
-          personaNueva = await Persona.create({
-            nombres: nuevo_socio_nombres.trim(),
-            apellidos: (nuevo_socio_apellidos || '').trim(),
-            ci: nuevo_socio_ci ? nuevo_socio_ci.trim() : null,
-            telefono: nuevo_socio_telefono ? nuevo_socio_telefono.trim() : null,
-            domicilio: nuevo_socio_domicilio ? nuevo_socio_domicilio.trim() : null,
-          }, { transaction: t });
+          personaNueva = await Persona.create(
+            {
+              nombres: nuevo_socio_nombres.trim(),
+              apellidos: (nuevo_socio_apellidos || '').trim(),
+              ci: nuevo_socio_ci ? nuevo_socio_ci.trim() : null,
+              telefono: nuevo_socio_telefono ? nuevo_socio_telefono.trim() : null,
+              domicilio: nuevo_socio_domicilio ? nuevo_socio_domicilio.trim() : null,
+            },
+            { transaction: t }
+          );
         } else {
-          await personaNueva.update({
-            nombres: nuevo_socio_nombres.trim(),
-            apellidos: (nuevo_socio_apellidos || personaNueva.apellidos || '').trim(),
-            telefono: nuevo_socio_telefono || personaNueva.telefono,
-            domicilio: nuevo_socio_domicilio || personaNueva.domicilio,
-          }, { transaction: t });
+          if (personaNueva.deleted_at) {
+            await personaNueva.restore({ transaction: t });
+          }
+          await personaNueva.update(
+            {
+              nombres: nuevo_socio_nombres.trim(),
+              apellidos: (nuevo_socio_apellidos || personaNueva.apellidos || '').trim(),
+              telefono: nuevo_socio_telefono || personaNueva.telefono,
+              domicilio: nuevo_socio_domicilio || personaNueva.domicilio,
+            },
+            { transaction: t }
+          );
         }
 
         // 1.3 Crear el nuevo Socio activo asignándole la caseta
-        const nuevoSocio = await Socio.create({
-          id_asociacion,
-          id_persona: personaNueva.id_persona,
-          nro_caseta: nroCasetaTraspaso,
-          estado_socio: 'Activo',
-        }, { transaction: t });
+        const nuevoSocio = await Socio.create(
+          {
+            id_asociacion,
+            id_persona: personaNueva.id_persona,
+            nro_caseta: nroCasetaTraspaso,
+            estado_socio: 'Activo',
+          },
+          { transaction: t }
+        );
 
         socio = nuevoSocio;
         id_socio = nuevoSocio.id_socio;
@@ -301,8 +341,10 @@ const createIngresoDirecto = async (req, res, next) => {
     // 3. Determinar o crear el Concepto de Cobro correspondiente
     const nombreConcepto = (concepto || 'Ingreso Directo de Caja').trim();
     const [conceptoRecord] = await ConceptoCobro.findOrCreate({
-      where: { id_asociacion, nombre_concepto: nombreConcepto },
+      where: { id_asociacion, nombre_concepto: nombreConcepto, deleted_at: null },
       defaults: {
+        id_asociacion,
+        nombre_concepto: nombreConcepto,
         monto_fijo: montoNum,
         aplica_mora: false,
         created_at: new Date(),
@@ -312,11 +354,15 @@ const createIngresoDirecto = async (req, res, next) => {
     });
 
     // 4. Determinar tipo de origen y glosa
-    const origenFinal = tipo_origen || (
-      nombreConcepto.toLowerCase().includes('traspaso') ? 'traspaso' :
-      nombreConcepto.toLowerCase().includes('afilia') ? 'afiliacion' :
-      nombreConcepto.toLowerCase().includes('alquiler') ? 'alquiler' : 'directo'
-    );
+    const origenFinal =
+      tipo_origen ||
+      (nombreConcepto.toLowerCase().includes('traspaso')
+        ? 'traspaso'
+        : nombreConcepto.toLowerCase().includes('afilia')
+        ? 'afiliacion'
+        : nombreConcepto.toLowerCase().includes('alquiler')
+        ? 'alquiler'
+        : 'directo');
 
     let glosaFinal = detalle || observacion || '';
     if (origenFinal === 'traspaso' && valor_venta_caseta) {
@@ -333,51 +379,60 @@ const createIngresoDirecto = async (req, res, next) => {
     // 5. Si hay socio vinculado, crear Cargo 'Pagado_Total' para trazabilidad financiera en su estado de cuenta
     let cargo = null;
     if (id_socio) {
-      cargo = await Cargo.create({
-        id_asociacion,
-        id_socio,
-        id_concepto: conceptoRecord.id_concepto,
-        tipo_origen: origenFinal,
-        periodo: new Date(fechaPagoEfectiva).toISOString().slice(0, 7),
-        detalle: glosaFinal,
-        monto_capital_inicial: montoNum,
-        saldo_capital_pendiente: 0.00,
-        monto_mora_acumulada: 0.00,
-        fecha_vencimiento: fechaPagoEfectiva,
-        estado: 'Pagado_Total',
-        created_at: new Date(),
-        updated_at: new Date(),
-      }, { transaction: t });
+      cargo = await Cargo.create(
+        {
+          id_asociacion,
+          id_socio,
+          id_concepto: conceptoRecord.id_concepto,
+          tipo_origen: origenFinal,
+          periodo: new Date(fechaPagoEfectiva).toISOString().slice(0, 7),
+          detalle: glosaFinal,
+          monto_capital_inicial: montoNum,
+          saldo_capital_pendiente: 0.0,
+          monto_mora_acumulada: 0.0,
+          fecha_vencimiento: fechaPagoEfectiva,
+          estado: 'Pagado_Total',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+        { transaction: t }
+      );
     }
 
     // 6. Crear el Comprobante Oficial de Ingreso
-    const ingreso = await Ingreso.create({
-      id_asociacion,
-      nro_recibo,
-      id_socio: id_socio || null,
-      id_usuario,
-      id_concepto: conceptoRecord.id_concepto,
-      concepto: nombreConcepto,
-      tipo_origen: origenFinal,
-      pagador: pagadorFinal,
-      monto_total_recibido: montoNum,
-      fecha_pago: fechaPagoEfectiva,
-      estado: 'Valido',
-      observacion: glosaFinal,
-      created_at: new Date(),
-      updated_at: new Date(),
-    }, { transaction: t });
+    const ingreso = await Ingreso.create(
+      {
+        id_asociacion,
+        nro_recibo,
+        id_socio: id_socio || null,
+        id_usuario,
+        id_concepto: conceptoRecord.id_concepto,
+        concepto: nombreConcepto,
+        tipo_origen: origenFinal,
+        pagador: pagadorFinal,
+        monto_total_recibido: montoNum,
+        fecha_pago: fechaPagoEfectiva,
+        estado: 'Valido',
+        observacion: glosaFinal,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      { transaction: t }
+    );
 
     // 7. Si hay cargo, vincularlo en IngresoDetalle
     if (cargo) {
-      await IngresoDetalle.create({
-        id_ingreso: ingreso.id_ingreso,
-        id_cargo: cargo.id_cargo,
-        monto_abonado_capital: montoNum,
-        monto_abonado_mora: 0.00,
-        created_at: new Date(),
-        updated_at: new Date(),
-      }, { transaction: t });
+      await IngresoDetalle.create(
+        {
+          id_ingreso: ingreso.id_ingreso,
+          id_cargo: cargo.id_cargo,
+          monto_abonado_capital: montoNum,
+          monto_abonado_mora: 0.0,
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+        { transaction: t }
+      );
     }
 
     await t.commit();
@@ -390,7 +445,8 @@ const createIngresoDirecto = async (req, res, next) => {
         { model: Usuario, as: 'cajero', attributes: { exclude: ['password'] } },
         { model: ConceptoCobro, as: 'concepto_cobro' },
         {
-          model: IngresoDetalle, as: 'detalles',
+          model: IngresoDetalle,
+          as: 'detalles',
           include: [{ model: Cargo, as: 'cargo', include: [{ model: ConceptoCobro, as: 'concepto' }] }],
         },
       ],
@@ -411,12 +467,22 @@ const createIngresoDirecto = async (req, res, next) => {
  */
 const getIngresos = async (req, res, next) => {
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const page = parseInt(req.query.page, 10) || 1;
     // Paginación por defecto optimizada para evitar saturación de memoria
     const limit = req.query.limit
       ? Math.min(parseInt(req.query.limit, 10) || 50, 500)
-      : (req.query.all === 'true' ? null : 100);
+      : req.query.all === 'true'
+      ? null
+      : 100;
     const offset = limit ? (page - 1) * limit : null;
 
     const { count, rows: ingresos } = await Ingreso.findAndCountAll({
@@ -485,7 +551,10 @@ const getIngresos = async (req, res, next) => {
           ],
         },
       ],
-      order: [['fecha_pago', 'DESC'], ['id_ingreso', 'DESC']],
+      order: [
+        ['fecha_pago', 'DESC'],
+        ['id_ingreso', 'DESC'],
+      ],
       limit: limit || undefined,
       offset: offset !== null ? offset : undefined,
       distinct: true,
@@ -509,16 +578,24 @@ const getIngresos = async (req, res, next) => {
 const getIngreso = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
 
     const ingreso = await Ingreso.findOne({
       where: { id_ingreso: id, id_asociacion, deleted_at: null },
       include: [
         { model: Asociacion, as: 'asociacion' },
         { model: Socio, as: 'socio', include: [{ model: Persona, as: 'persona' }] },
-        { model: Usuario, as: 'cajero' },
+        { model: Usuario, as: 'cajero', attributes: { exclude: ['password'] } },
         {
-          model: IngresoDetalle, as: 'detalles',
+          model: IngresoDetalle,
+          as: 'detalles',
           include: [{ model: Cargo, as: 'cargo', include: [{ model: ConceptoCobro, as: 'concepto' }] }],
         },
       ],
@@ -539,7 +616,16 @@ const anularIngreso = async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
     const { id } = req.params;
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.body.id_asociacion || req.query.id_asociacion)
+        ? req.body.id_asociacion || req.query.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      await t.rollback();
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const motivo = (req.body.observacion || req.body.motivo || req.body.motivo_anulacion || '').trim();
 
     if (!motivo || motivo.length < 5) {
@@ -562,7 +648,7 @@ const anularIngreso = async (req, res, next) => {
       return res.status(404).json({ mensaje: 'Recibo de ingreso no encontrado en esta asociación.' });
     }
 
-    if (String(ingreso.estado).toUpperCase() !== 'VALIDO') {
+    if (String(ingreso.estado).toLowerCase() !== 'valido') {
       await t.rollback();
       return res.status(400).json({
         mensaje: `El recibo no puede ser anulado porque ya se encuentra en estado '${ingreso.estado}'.`,
@@ -579,11 +665,14 @@ const anularIngreso = async (req, res, next) => {
 
       if (cargo && cargo.estado !== 'Anulado') {
         if (cargo.tipo_origen === 'traspaso' || cargo.tipo_origen === 'afiliacion' || cargo.tipo_origen === 'directo') {
-          await cargo.update({
-            saldo_capital_pendiente: 0.00,
-            estado: 'Anulado',
-            updated_at: new Date(),
-          }, { transaction: t });
+          await cargo.update(
+            {
+              saldo_capital_pendiente: 0.0,
+              estado: 'Anulado',
+              updated_at: new Date(),
+            },
+            { transaction: t }
+          );
         } else {
           const abonadoCap = Math.round(parseFloat(detalle.monto_abonado_capital || 0) * 100) / 100;
           const abonadoMora = Math.round(parseFloat(detalle.monto_abonado_mora || 0) * 100) / 100;
@@ -594,23 +683,29 @@ const anularIngreso = async (req, res, next) => {
           const capitalInicial = Math.round(parseFloat(cargo.monto_capital_inicial || 0) * 100) / 100;
           const nuevoEstado = saldoRevertido >= capitalInicial ? 'Pendiente' : 'Pagado_Parcial';
 
-          await cargo.update({
-            saldo_capital_pendiente: saldoRevertido.toFixed(2),
-            monto_mora_acumulada: moraRevertida.toFixed(2),
-            estado: nuevoEstado,
-            updated_at: new Date(),
-          }, { transaction: t });
+          await cargo.update(
+            {
+              saldo_capital_pendiente: saldoRevertido.toFixed(2),
+              monto_mora_acumulada: moraRevertida.toFixed(2),
+              estado: nuevoEstado,
+              updated_at: new Date(),
+            },
+            { transaction: t }
+          );
         }
       }
     }
 
     // 3. Actualizar estado del ingreso a Anulado con auditoría
     const textoAuditoria = `[ANULADO por ${req.user.username}]: ${motivo}`;
-    await ingreso.update({
-      estado: 'Anulado',
-      observacion: ingreso.observacion ? `${ingreso.observacion} | ${textoAuditoria}` : textoAuditoria,
-      updated_at: new Date(),
-    }, { transaction: t });
+    await ingreso.update(
+      {
+        estado: 'Anulado',
+        observacion: ingreso.observacion ? `${ingreso.observacion} | ${textoAuditoria}` : textoAuditoria,
+        updated_at: new Date(),
+      },
+      { transaction: t }
+    );
 
     await t.commit();
     return res.status(200).json({
@@ -631,3 +726,4 @@ module.exports = {
   getIngreso,
   anularIngreso,
 };
+

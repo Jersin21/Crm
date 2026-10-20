@@ -1,10 +1,11 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import styled from "styled-components";
 import axios from "axios";
 import { toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
 import { useParams, useNavigate } from "react-router-dom";
+import { ArrowLeft, CreditCard } from "lucide-react";
 import Sidebar from "../components/Sidebar";
+import Modal from "../components/Modal";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
 import theme from "../styles/theme";
@@ -81,46 +82,6 @@ const SocioInfoCard = styled(Card)`
   }
 `;
 
-const ModalOverlay = styled.div`
-  position: fixed;
-  inset: 0;
-  background-color: rgba(5, 10, 23, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  padding: 1rem;
-`;
-
-const ModalCard = styled(Card)`
-  width: 100%;
-  max-width: 600px;
-  max-height: 90vh;
-  overflow-y: auto;
-`;
-
-const ModalHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-
-  h2 {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: ${theme.colors.textMain};
-  }
-
-  button {
-    background: none;
-    border: none;
-    color: ${theme.colors.textMuted};
-    font-size: 1.5rem;
-    cursor: pointer;
-    &:hover { color: ${theme.colors.textMain}; }
-  }
-`;
-
 const CargoCheckRow = styled.div`
   display: flex;
   align-items: center;
@@ -131,12 +92,23 @@ const CargoCheckRow = styled.div`
   background-color: ${theme.colors.bgInput};
   margin-bottom: 0.5rem;
 
-  input[type="checkbox"] { cursor: pointer; width: 18px; height: 18px; }
+  input[type="checkbox"] {
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+  }
 
   .cargo-info {
     flex: 1;
-    p { font-size: 0.85rem; color: ${theme.colors.textMain}; font-weight: 600; }
-    span { font-size: 0.75rem; color: ${theme.colors.textMuted}; }
+    p {
+      font-size: 0.85rem;
+      color: ${theme.colors.textMain};
+      font-weight: 600;
+    }
+    span {
+      font-size: 0.75rem;
+      color: ${theme.colors.textMuted};
+    }
   }
 
   .monto-input {
@@ -157,7 +129,7 @@ const Label = styled.label`
 const Input = styled.input`
   padding: 0.625rem 0.875rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -166,8 +138,15 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  display: block;
+  margin-top: 0.25rem;
 `;
 
 const FormActions = styled.div`
@@ -186,7 +165,9 @@ const CancelButton = styled.button`
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  &:hover { color: ${theme.colors.textMain}; }
+  &:hover {
+    color: ${theme.colors.textMain};
+  }
 `;
 
 const TotalRow = styled.div`
@@ -199,8 +180,14 @@ const TotalRow = styled.div`
   margin-top: 1rem;
   border: 1px solid ${theme.colors.border};
 
-  span { color: ${theme.colors.textMuted}; font-size: 0.875rem; }
-  strong { color: ${theme.colors.textMain}; font-size: 1.1rem; }
+  span {
+    color: ${theme.colors.textMuted};
+    font-size: 0.875rem;
+  }
+  strong {
+    color: ${theme.colors.textMain};
+    font-size: 1.1rem;
+  }
 `;
 
 // ─── Componente ───────────────────────────────────────────────────────────────
@@ -213,7 +200,6 @@ function EstadoCuentaSocioPage() {
   const [cargos, setCargos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalPago, setModalPago] = useState(false);
-  // Estado para los cargos seleccionados a pagar y sus montos
   const [pagoItems, setPagoItems] = useState({});
   const [guardando, setGuardando] = useState(false);
 
@@ -224,14 +210,17 @@ function EstadoCuentaSocioPage() {
         axios.get(`${sociosRoute}/${id}`, auth.config),
         axios.get(`${cargosRoute}?id_socio=${id}`, auth.config),
       ]);
-      const socioData = resSocio.data.socio || resSocio.data;
+      const socioData = resSocio.data?.socio || resSocio.data;
       setSocio(socioData);
       const listaCargos = Array.isArray(resCargos.data)
         ? resCargos.data
-        : resCargos.data.cargos || [];
+        : resCargos.data?.cargos || [];
       setCargos(listaCargos);
     } catch (err) {
-      toast.error("Error al cargar los datos del socio", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar los datos del socio",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -246,17 +235,19 @@ function EstadoCuentaSocioPage() {
     [cargos]
   );
 
+  const [pagoErrors, setPagoErrors] = useState({});
+
   const abrirPago = () => {
-    // Inicializa los montos con el saldo pendiente + mora
     const items = {};
     cargosPendientes.forEach((c) => {
       items[c.id_cargo] = {
         seleccionado: false,
-        monto_capital: parseFloat(c.saldo_capital_pendiente || 0),
-        monto_mora: parseFloat(c.monto_mora_acumulada || 0),
+        monto_capital: parseFloat(c.saldo_capital_pendiente || 0) || 0,
+        monto_mora: parseFloat(c.monto_mora_acumulada || 0) || 0,
       };
     });
     setPagoItems(items);
+    setPagoErrors({});
     setModalPago(true);
   };
 
@@ -265,55 +256,115 @@ function EstadoCuentaSocioPage() {
       ...prev,
       [id_cargo]: { ...prev[id_cargo], seleccionado: !prev[id_cargo].seleccionado },
     }));
+    setPagoErrors((prev) => {
+      const next = { ...prev };
+      delete next[`${id_cargo}_capital`];
+      delete next[`${id_cargo}_mora`];
+      delete next[`${id_cargo}_total`];
+      delete next.general;
+      return next;
+    });
   };
 
   const updateMonto = (id_cargo, campo, valor) => {
+    const val = parseFloat(valor);
     setPagoItems((prev) => ({
       ...prev,
-      [id_cargo]: { ...prev[id_cargo], [campo]: parseFloat(valor) || 0 },
+      [id_cargo]: { ...prev[id_cargo], [campo]: isNaN(val) ? "" : valor },
     }));
+    setPagoErrors((prev) => {
+      const next = { ...prev };
+      delete next[`${id_cargo}_${campo}`];
+      delete next[`${id_cargo}_total`];
+      delete next.general;
+      return next;
+    });
   };
 
-  // Cálculo financiero memoizado para evitar bucles de suma en renderizados
+  const validatePago = () => {
+    const errors = {};
+    const seleccionados = Object.entries(pagoItems).filter(([, v]) => v.seleccionado);
+    if (seleccionados.length === 0) {
+      errors.general = "Selecciona al menos un cargo a pagar";
+      return errors;
+    }
+    seleccionados.forEach(([id_cargo, v]) => {
+      const cargo = cargosPendientes.find((c) => String(c.id_cargo) === String(id_cargo));
+      const saldoMax = parseFloat(cargo?.saldo_capital_pendiente || 0);
+      const moraMax = parseFloat(cargo?.monto_mora_acumulada || 0);
+
+      const cap = parseFloat(v.monto_capital);
+      const mora = parseFloat(v.monto_mora);
+
+      if (v.monto_capital === "" || isNaN(cap) || cap < 0) {
+        errors[`${id_cargo}_capital`] = "Monto inválido";
+      } else if (cap > saldoMax + 0.01) {
+        errors[`${id_cargo}_capital`] = `Máx: ${saldoMax.toFixed(2)}`;
+      }
+
+      if (v.monto_mora === "" || isNaN(mora) || mora < 0) {
+        errors[`${id_cargo}_mora`] = "Monto inválido";
+      } else if (mora > moraMax + 0.01) {
+        errors[`${id_cargo}_mora`] = `Máx: ${moraMax.toFixed(2)}`;
+      }
+
+      if ((cap || 0) + (mora || 0) <= 0) {
+        errors[`${id_cargo}_total`] = "El monto debe ser mayor a 0";
+      }
+    });
+    return errors;
+  };
+
   const totalPago = useMemo(
     () =>
       Object.entries(pagoItems)
         .filter(([, v]) => v.seleccionado)
-        .reduce((s, [, v]) => s + v.monto_capital + v.monto_mora, 0),
+        .reduce((s, [, v]) => s + (parseFloat(v.monto_capital) || 0) + (parseFloat(v.monto_mora) || 0), 0),
     [pagoItems]
   );
 
   const handleRegistrarPago = async (e) => {
     e.preventDefault();
-    const cargosSeleccionados = Object.entries(pagoItems)
-      .filter(([, v]) => v.seleccionado)
-      .map(([id_cargo, v]) => ({
-        id_cargo: parseInt(id_cargo),
-        monto_capital: v.monto_capital,
-        monto_mora: v.monto_mora,
-      }));
-
-    if (cargosSeleccionados.length === 0) {
-      toast.error("Selecciona al menos un cargo a pagar", toastOptions);
+    const errors = validatePago();
+    setPagoErrors(errors);
+    if (Object.keys(errors).length > 0) {
+      if (errors.general) {
+        toast.error(errors.general, toastOptions);
+      } else {
+        toast.error("Corrige los montos antes de registrar el pago", toastOptions);
+      }
       return;
     }
 
+    const cargosSeleccionados = Object.entries(pagoItems)
+      .filter(([, v]) => v.seleccionado)
+      .map(([id_cargo, v]) => ({
+        id_cargo: parseInt(id_cargo, 10),
+        monto_abonado_capital: parseFloat(v.monto_capital) || 0,
+        monto_abonado_mora: parseFloat(v.monto_mora) || 0,
+      }));
+
     try {
       setGuardando(true);
+      // Corrección de contrato con el backend (ingresoController espera monto_total_recibido y cargos)
       await axios.post(
         ingresosRoute,
         {
-          id_socio: parseInt(id),
-          monto_total: totalPago,
-          detalle_pagos: cargosSeleccionados,
+          id_socio: parseInt(id, 10),
+          monto_total_recibido: parseFloat(totalPago.toFixed(2)),
+          observacion: `Pago en ventanilla registrado desde Estado de Cuenta de Socio #${id}`,
+          cargos: cargosSeleccionados,
         },
         auth.config
       );
-      toast.success("Pago registrado correctamente", toastOptions);
+      toast.success("Pago registrado correctamente en el libro de caja", toastOptions);
       setModalPago(false);
       fetchData();
     } catch (err) {
-      toast.error(err.response?.data?.msg || "Error al registrar el pago", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || err.response?.data?.msg || "Error al registrar el pago",
+        toastOptions
+      );
     } finally {
       setGuardando(false);
     }
@@ -326,7 +377,7 @@ function EstadoCuentaSocioPage() {
       <PageContainer>
         <Sidebar />
         <ContentContainer>
-          <p style={{ color: theme.colors.textMuted }}>Cargando...</p>
+          <p style={{ color: theme.colors.textMuted }}>Cargando estado de cuenta...</p>
         </ContentContainer>
       </PageContainer>
     );
@@ -339,13 +390,15 @@ function EstadoCuentaSocioPage() {
         <SectionHeader>
           <div className="titles">
             <h1>Estado de Cuenta</h1>
-            <p>Cargos y pagos del socio</p>
+            <p>Cargos, vencimientos y pagos del socio</p>
           </div>
           <div className="actions">
-            <BackButton onClick={() => navigate("/socios")}>← Volver</BackButton>
+            <BackButton onClick={() => navigate("/socios")}>
+              <ArrowLeft size={16} /> Volver
+            </BackButton>
             {cargosPendientes.length > 0 && (
               <ActionButton $variant="success" onClick={abrirPago}>
-                💳 Registrar Pago
+                <CreditCard size={16} /> Registrar Pago
               </ActionButton>
             )}
           </div>
@@ -398,14 +451,19 @@ function EstadoCuentaSocioPage() {
                 ) : (
                   cargos.map((c) => (
                     <TableRow key={c.id_cargo}>
-                      <TableCell>{c.ConceptoCobro?.nombre || c.concepto || "-"}</TableCell>
+                      <TableCell>
+                        {c.ConceptoCobro?.nombre_concepto ||
+                          c.concepto?.nombre_concepto ||
+                          c.concepto ||
+                          "-"}
+                      </TableCell>
                       <TableCell>{c.periodo || "-"}</TableCell>
                       <TableCell style={{ maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {c.detalle || "-"}
                       </TableCell>
                       <TableCell>{formatMonto(c.monto_capital_inicial)}</TableCell>
                       <TableCell>{formatMonto(c.saldo_capital_pendiente)}</TableCell>
-                      <TableCell style={{ color: parseFloat(c.monto_mora_acumulada) > 0 ? theme.colors.danger : "inherit" }}>
+                      <TableCell style={{ color: parseFloat(c.monto_mora_acumulada || 0) > 0 ? theme.colors.danger : "inherit" }}>
                         {formatMonto(c.monto_mora_acumulada)}
                       </TableCell>
                       <TableCell>{c.fecha_vencimiento ? formatDate(c.fecha_vencimiento) : "-"}</TableCell>
@@ -422,76 +480,90 @@ function EstadoCuentaSocioPage() {
       </ContentContainer>
 
       {/* Modal de Pago */}
-      {modalPago && (
-        <ModalOverlay onClick={(e) => e.target === e.currentTarget && setModalPago(false)}>
-          <ModalCard>
-            <ModalHeader>
-              <h2>💳 Registrar Pago</h2>
-              <button onClick={() => setModalPago(false)}>×</button>
-            </ModalHeader>
-            <form onSubmit={handleRegistrarPago}>
-              <p style={{ color: theme.colors.textMuted, fontSize: "0.875rem", marginBottom: "1rem" }}>
-                Selecciona los cargos a cancelar e ingresa el monto a pagar por cada uno.
-              </p>
-              {cargosPendientes.map((c) => {
-                const item = pagoItems[c.id_cargo];
-                return (
-                  <CargoCheckRow key={c.id_cargo}>
-                    <input
-                      type="checkbox"
-                      checked={item?.seleccionado || false}
-                      onChange={() => toggleCargo(c.id_cargo)}
-                    />
-                    <div className="cargo-info">
-                      <p>{c.ConceptoCobro?.nombre || c.concepto} — {c.periodo}</p>
-                      <span>
-                        Saldo: {formatMonto(c.saldo_capital_pendiente)} | Mora: {formatMonto(c.monto_mora_acumulada)}
-                      </span>
-                    </div>
-                    {item?.seleccionado && (
-                      <div style={{ display: "flex", gap: "0.5rem" }}>
-                        <div>
-                          <Label>Capital</Label>
-                          <Input
-                            className="monto-input"
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={item.monto_capital}
-                            onChange={(e) => updateMonto(c.id_cargo, "monto_capital", e.target.value)}
-                            style={{ width: 100 }}
-                          />
-                        </div>
-                        <div>
-                          <Label>Mora</Label>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={item.monto_mora}
-                            onChange={(e) => updateMonto(c.id_cargo, "monto_mora", e.target.value)}
-                            style={{ width: 80 }}
-                          />
-                        </div>
+      <Modal
+        isOpen={modalPago}
+        onClose={() => setModalPago(false)}
+        title="Registrar Pago de Cargos"
+        maxWidth="600px"
+      >
+        <form onSubmit={handleRegistrarPago}>
+          <p style={{ color: theme.colors.textMuted, fontSize: "0.875rem", marginBottom: "1rem" }}>
+            Selecciona los cargos a cancelar e ingresa el monto a pagar por cada uno.
+          </p>
+          {cargosPendientes.map((c) => {
+            const item = pagoItems[c.id_cargo];
+            return (
+              <CargoCheckRow key={c.id_cargo}>
+                <input
+                  type="checkbox"
+                  checked={item?.seleccionado || false}
+                  onChange={() => toggleCargo(c.id_cargo)}
+                />
+                <div className="cargo-info">
+                  <p>
+                    {c.ConceptoCobro?.nombre_concepto || c.concepto?.nombre_concepto || c.concepto} — {c.periodo || "General"}
+                  </p>
+                  <span>
+                    Saldo: {formatMonto(c.saldo_capital_pendiente)} | Mora: {formatMonto(c.monto_mora_acumulada)}
+                  </span>
+                </div>
+                {item?.seleccionado && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                      <div>
+                        <Label>Capital</Label>
+                        <Input
+                          className="monto-input"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.monto_capital}
+                          $hasError={!!pagoErrors[`${c.id_cargo}_capital`]}
+                          onChange={(e) => updateMonto(c.id_cargo, "monto_capital", e.target.value)}
+                          style={{ width: 100 }}
+                        />
+                        {pagoErrors[`${c.id_cargo}_capital`] && (
+                          <ErrorText>{pagoErrors[`${c.id_cargo}_capital`]}</ErrorText>
+                        )}
                       </div>
+                      <div>
+                        <Label>Mora</Label>
+                        <Input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.monto_mora}
+                          $hasError={!!pagoErrors[`${c.id_cargo}_mora`]}
+                          onChange={(e) => updateMonto(c.id_cargo, "monto_mora", e.target.value)}
+                          style={{ width: 80 }}
+                        />
+                        {pagoErrors[`${c.id_cargo}_mora`] && (
+                          <ErrorText>{pagoErrors[`${c.id_cargo}_mora`]}</ErrorText>
+                        )}
+                      </div>
+                    </div>
+                    {pagoErrors[`${c.id_cargo}_total`] && (
+                      <ErrorText>{pagoErrors[`${c.id_cargo}_total`]}</ErrorText>
                     )}
-                  </CargoCheckRow>
-                );
-              })}
-              <TotalRow>
-                <span>Total a pagar:</span>
-                <strong>Bs. {totalPago.toFixed(2)}</strong>
-              </TotalRow>
-              <FormActions>
-                <CancelButton type="button" onClick={() => setModalPago(false)}>Cancelar</CancelButton>
-                <ActionButton $variant="success" type="submit" disabled={guardando}>
-                  {guardando ? "Registrando..." : "Confirmar Pago"}
-                </ActionButton>
-              </FormActions>
-            </form>
-          </ModalCard>
-        </ModalOverlay>
-      )}
+                  </div>
+                )}
+              </CargoCheckRow>
+            );
+          })}
+          <TotalRow>
+            <span>Total a pagar:</span>
+            <strong>Bs. {totalPago.toFixed(2)}</strong>
+          </TotalRow>
+          <FormActions>
+            <CancelButton type="button" onClick={() => setModalPago(false)}>
+              Cancelar
+            </CancelButton>
+            <ActionButton $variant="success" type="submit" disabled={guardando || totalPago <= 0}>
+              {guardando ? "Registrando..." : "Confirmar Pago"}
+            </ActionButton>
+          </FormActions>
+        </form>
+      </Modal>
     </PageContainer>
   );
 }

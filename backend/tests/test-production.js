@@ -6,7 +6,7 @@
  */
 const http = require('http');
 
-const BASE_URL = 'http://localhost:3031/api';
+const BASE_URL = process.env.API_URL || 'http://localhost:3031/api';
 let PASS = 0;
 let FAIL = 0;
 let tokens = {};
@@ -357,4 +357,8 @@ async function main() {
   }
 }
 
-main().catch(e => { console.error('ERROR FATAL:', e); process.exit(1); });
+if (require.main === module) {
+  main().catch(e => { console.error('ERROR FATAL:', e); process.exit(1); });
+}
+
+module.exports = { main };

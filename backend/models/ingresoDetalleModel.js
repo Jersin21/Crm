@@ -47,6 +47,16 @@ const IngresoDetalle = sequelize.define('ingreso_detalle', {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   deletedAt: 'deleted_at',
+  indexes: [
+    {
+      name: 'idx_ingresos_det_ingreso',
+      fields: ['id_ingreso'],
+    },
+    {
+      name: 'idx_ingresos_det_cargo',
+      fields: ['id_cargo'],
+    },
+  ],
 });
 
 module.exports = IngresoDetalle;

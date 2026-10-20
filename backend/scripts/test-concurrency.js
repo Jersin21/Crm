@@ -30,12 +30,13 @@ async function ejecutarPruebaConcurrencia() {
   try {
     // 1. Iniciar sesión para obtener Token JWT con id_asociacion
     console.log('\n🔑 1. Autenticando cajero/presidente en API...');
+    const testPassword = process.env.ADMIN_TEST_PASSWORD || 'misocios2024';
     const loginResponse = await fetch(`${BASE_URL}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         username: 'admin',
-        password: 'misocios2024',
+        password: testPassword,
       }),
     });
 
@@ -200,4 +201,8 @@ async function ejecutarPruebaConcurrencia() {
   }
 }
 
-ejecutarPruebaConcurrencia();
+if (require.main === module) {
+  ejecutarPruebaConcurrencia();
+}
+
+module.exports = { ejecutarPruebaConcurrencia };

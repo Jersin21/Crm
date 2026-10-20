@@ -29,7 +29,7 @@ router.put(
 // Gestión de asociaciones (Superadmin o Admin de Mercado)
 router.get('/',     getAsociaciones);
 router.get('/:id',  getAsociacion);
-router.post('/',    requireRole(['SUPERADMIN_SAAS', 'ADMIN_ASOCIACION', 'PRESIDENTE']), createAsociacion);
+router.post('/',    requireRole(['SUPERADMIN_SAAS']), createAsociacion);
 router.put('/:id',  requireRole(['SUPERADMIN_SAAS', 'ADMIN_ASOCIACION', 'PRESIDENTE']), updateAsociacion);
 router.delete('/:id', requireRole(['SUPERADMIN_SAAS']), deleteAsociacion);
 

@@ -4,6 +4,8 @@ import axios from "axios";
 import { toast } from "react-toastify";
 import { useParams, useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import ConfirmModal from "../components/ConfirmModal";
+import { Zap, Lock } from "lucide-react";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
 import theme from "../styles/theme";
@@ -51,7 +53,9 @@ const AttendanceSelect = styled.select`
     border-color: ${theme.colors.primary};
   }
 
-  option { background-color: ${theme.colors.bgCard}; }
+  option {
+    background-color: ${theme.colors.bgCard};
+  }
 `;
 
 function AsistenciaPage() {
@@ -64,6 +68,7 @@ function AsistenciaPage() {
   const [busqueda, setBusqueda] = useState("");
   const [guardandoId, setGuardandoId] = useState(null);
   const [aplicandoMultas, setAplicandoMultas] = useState(false);
+  const [confirmMultasOpen, setConfirmMultasOpen] = useState(false);
 
   const fetchDatos = async () => {
     try {
@@ -73,10 +78,15 @@ function AsistenciaPage() {
       setEvento(ev);
 
       const resAsist = await axios.get(`${asistenciasRoute}/evento/${id}`, auth.config);
-      const lista = Array.isArray(resAsist.data) ? resAsist.data : resAsist.data.asistencias || [];
+      const lista = Array.isArray(resAsist.data)
+        ? resAsist.data
+        : resAsist.data.asistencias || [];
       setAsistencias(lista);
     } catch (err) {
-      toast.error("Error al cargar la asistencia del evento", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar la asistencia del evento",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -89,34 +99,46 @@ function AsistenciaPage() {
   const handleEstadoChange = async (idAsistencia, nuevoEstado) => {
     try {
       setGuardandoId(idAsistencia);
-      const multaBs = evento?.monto_multa ? parseFloat(evento.monto_multa).toFixed(2) : "30.00";
+      const multaBs = evento?.monto_multa
+        ? parseFloat(evento.monto_multa).toFixed(2)
+        : "30.00";
+
       await axios.put(
         `${asistenciasRoute}/${idAsistencia}`,
         { estado_asistencia: nuevoEstado },
         auth.config
       );
+
       setAsistencias((prev) =>
         prev.map((a) =>
           a.id_asistencia === idAsistencia ? { ...a, estado_asistencia: nuevoEstado } : a
         )
       );
+
       toast.success(
-        `Asistencia: ${nuevoEstado}${nuevoEstado === "Falta" ? ` (Multa de ${multaBs} Bs registrada en caja)` : ""}`,
+        `Asistencia: ${nuevoEstado}${
+          nuevoEstado === "Falta"
+            ? ` (Multa de ${multaBs} Bs registrada en caja)`
+            : ""
+        }`,
         toastOptions
       );
     } catch (err) {
-      toast.error("Error al actualizar asistencia", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al actualizar la asistencia",
+        toastOptions
+      );
     } finally {
       setGuardandoId(null);
     }
   };
 
-  const handleAplicarMultas = async () => {
-    if (!window.confirm(`¿Confirmar y liquidar multas a los inasistentes de "${evento.nombre_evento}"? Se generarán los cargos exigibles en caja.`)) return;
+  const ejecutarAplicarMultas = async () => {
     try {
       setAplicandoMultas(true);
       const { data } = await axios.post(aplicarMultasEventoRoute(id), {}, auth.config);
       toast.success(data.mensaje || "Multas sincronizadas exitosamente en caja", toastOptions);
+      setConfirmMultasOpen(false);
       fetchDatos();
     } catch (err) {
       toast.error(err.response?.data?.mensaje || "Error al aplicar multas", toastOptions);
@@ -130,7 +152,7 @@ function AsistenciaPage() {
     const persona = socio.persona || socio.Persona || {};
     const nombre = `${persona.nombres || ""} ${persona.apellidos || ""}`.toLowerCase();
     const caseta = String(socio.nro_caseta || "").toLowerCase();
-    const q = busqueda.toLowerCase();
+    const q = busqueda.trim().toLowerCase();
     return nombre.includes(q) || caseta.includes(q);
   });
 
@@ -138,10 +160,9 @@ function AsistenciaPage() {
   const faltasCount = asistencias.filter((a) => a.estado_asistencia === "Falta").length;
   const licenciasCount = asistencias.filter((a) => a.estado_asistencia === "Licencia").length;
 
-  const fechaEvento = evento ? new Date(evento.fecha) : new Date();
-  const hoy = new Date();
-  hoy.setHours(0, 0, 0, 0);
-  const eventoConcluido = fechaEvento < hoy;
+  const fechaEvStr = evento?.fecha ? String(evento.fecha).slice(0, 10) : "";
+  const hoyStr = new Date().toISOString().split("T")[0];
+  const eventoConcluido = Boolean(fechaEvStr && fechaEvStr < hoyStr);
 
   return (
     <PageContainer>
@@ -150,7 +171,7 @@ function AsistenciaPage() {
         <SectionHeader>
           <div className="titles">
             <h1>Control de Asistencia y Multas</h1>
-            <p>Toma de lista obligatoria y generación de cargos por inasistencia</p>
+            <p>Toma de lista obligatoria y generación de cargos automáticos por inasistencia</p>
           </div>
           <div className="actions" style={{ display: "flex", gap: "0.75rem" }}>
             <ActionButton $variant="outline" onClick={() => navigate("/eventos")}>
@@ -158,11 +179,13 @@ function AsistenciaPage() {
             </ActionButton>
             <ActionButton
               $variant="danger"
-              onClick={handleAplicarMultas}
+              onClick={() => setConfirmMultasOpen(true)}
               disabled={aplicandoMultas || faltasCount === 0}
               title="Aplica o sincroniza las multas de todos los socios con Falta en la caja"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             >
-              {aplicandoMultas ? "Liquidando..." : "⚡ Aplicar Multas a Inasistentes"}
+              <Zap size={14} />
+              {aplicandoMultas ? "Liquidando..." : "Aplicar Multas a Inasistentes"}
             </ActionButton>
           </div>
         </SectionHeader>
@@ -216,7 +239,7 @@ function AsistenciaPage() {
               fontSize: "0.875rem",
             }}
           >
-            <span style={{ fontSize: "1.5rem" }}>🔒</span>
+            <Lock size={20} color="#fca5a5" style={{ flexShrink: 0 }} />
             <div>
               <strong>Lista de Asistencia Cerrada:</strong> Este evento concluyó el{" "}
               {formatDate(evento?.fecha)}. No es posible modificar las asistencias y las multas a
@@ -283,9 +306,9 @@ function AsistenciaPage() {
                             title={eventoConcluido ? "Evento concluido, lista cerrada" : ""}
                             onChange={(e) => handleEstadoChange(a.id_asistencia, e.target.value)}
                           >
-                            <option value="Presente">✅ Presente</option>
-                            <option value="Falta">❌ Falta (Aplica Multa)</option>
-                            <option value="Licencia">⚠️ Licencia Justificada</option>
+                            <option value="Presente">Presente</option>
+                            <option value="Falta">Falta (Aplica Multa)</option>
+                            <option value="Licencia">Licencia Justificada</option>
                           </AttendanceSelect>
                         </TableCell>
                       </TableRow>
@@ -297,6 +320,18 @@ function AsistenciaPage() {
           </TableResponsiveWrapper>
         </TableCard>
       </ContentContainer>
+
+      {/* ConfirmModal para liquidación de multas */}
+      <ConfirmModal
+        isOpen={confirmMultasOpen}
+        onClose={() => setConfirmMultasOpen(false)}
+        onConfirm={ejecutarAplicarMultas}
+        title="¿Liquidar Multas a Inasistentes?"
+        message={`¿Confirmar y liquidar multas a los inasistentes de "${evento?.nombre_evento}"? Se generarán los cargos exigibles en caja (${faltasCount} socio(s) con Falta).`}
+        confirmText="Liquidar Multas"
+        isDanger={true}
+        loading={aplicandoMultas}
+      />
     </PageContainer>
   );
 }

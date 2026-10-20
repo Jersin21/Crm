@@ -1,17 +1,30 @@
 const { Op } = require('sequelize');
 const { ConsumoLuz, Socio, Cargo, ConceptoCobro, Persona, Asociacion } = require('../models');
+const sequelize = require('../db/connection');
 
 /**
  * registrarConsumo: registrar lectura de medidor y generar cargo de luz automáticamente
  * con validaciones de correlatividad y sanción por 3er mes impago consecutivo.
+ * Protegido con transacción atómica de base de datos.
  */
 const registrarConsumo = async (req, res, next) => {
+  const transaction = await sequelize.transaction();
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.body.id_asociacion || req.query.id_asociacion)
+        ? req.body.id_asociacion || req.query.id_asociacion
+        : req.user.id_asociacion;
     const id_usuario = req.user.id_usuario;
+
+    if (!id_asociacion) {
+      await transaction.rollback();
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     let { id_socio, mes_anio, lectura_anterior, lectura_actual, fecha_lectura } = req.body;
 
     if (!id_socio || lectura_actual === undefined) {
+      await transaction.rollback();
       return res.status(400).json({ mensaje: 'Faltan campos requeridos: id_socio y lectura_actual.' });
     }
 
@@ -20,16 +33,24 @@ const registrarConsumo = async (req, res, next) => {
     mes_anio = mes_anio || fecha_lectura.slice(0, 7);
 
     // Verificar que el socio pertenezca a la asociación
-    const socio = await Socio.findOne({ where: { id_socio, id_asociacion, deleted_at: null } });
-    if (!socio) return res.status(404).json({ mensaje: 'Socio no encontrado en esta asociación.' });
-
-    // Obtener historial de lecturas del socio ordenado cronológicamente
-    const lecturasPrevias = await ConsumoLuz.findAll({
-      where: { id_socio, deleted_at: null },
-      order: [['mes_anio', 'DESC'], ['fecha_lectura', 'DESC']],
+    const socio = await Socio.findOne({
+      where: { id_socio, id_asociacion, deleted_at: null },
+      transaction,
     });
+    if (!socio) {
+      await transaction.rollback();
+      return res.status(404).json({ mensaje: 'Socio no encontrado en esta asociación.' });
+    }
 
-    const ultimaLectura = lecturasPrevias.length > 0 ? lecturasPrevias[0] : null;
+    // Obtener la última lectura previa registrada (optimizado a 1 registro LIMIT 1)
+    const ultimaLectura = await ConsumoLuz.findOne({
+      where: { id_socio, deleted_at: null },
+      order: [
+        ['mes_anio', 'DESC'],
+        ['fecha_lectura', 'DESC'],
+      ],
+      transaction,
+    });
 
     // Si no se envió lectura_anterior, tomar la de la última lectura o 0
     if (lectura_anterior === undefined || lectura_anterior === null) {
@@ -41,6 +62,7 @@ const registrarConsumo = async (req, res, next) => {
 
     // Validación 1: Lectura actual no puede ser menor a la anterior
     if (lectura_actual < lectura_anterior) {
+      await transaction.rollback();
       return res.status(400).json({
         mensaje: `La lectura actual (${lectura_actual} kWh) no puede ser menor a la lectura anterior (${lectura_anterior} kWh).`,
       });
@@ -51,6 +73,7 @@ const registrarConsumo = async (req, res, next) => {
       const dNueva = new Date(fecha_lectura);
       const dUltima = new Date(ultimaLectura.fecha_lectura);
       if (dNueva < dUltima) {
+        await transaction.rollback();
         return res.status(400).json({
           mensaje: `La fecha de lectura (${fecha_lectura}) no puede ser anterior a la última lectura registrada (${ultimaLectura.fecha_lectura}).`,
         });
@@ -67,6 +90,7 @@ const registrarConsumo = async (req, res, next) => {
       const mesEsperado = `${anioSig}-${String(mesSig).padStart(2, '0')}`;
 
       if (mes_anio > mesEsperado) {
+        await transaction.rollback();
         return res.status(400).json({
           mensaje: `No puede saltarse el mes correlativo ${mesEsperado}. La última lecturación registrada para este socio fue ${ultimaLectura.mes_anio}.`,
         });
@@ -76,8 +100,10 @@ const registrarConsumo = async (req, res, next) => {
     // Validación 4: Verificar duplicidad de periodo
     const consumoExistente = await ConsumoLuz.findOne({
       where: { id_socio, mes_anio, deleted_at: null },
+      transaction,
     });
     if (consumoExistente) {
+      await transaction.rollback();
       return res.status(400).json({
         mensaje: `El socio ya tiene una lecturación registrada para el periodo ${mes_anio}.`,
       });
@@ -85,31 +111,31 @@ const registrarConsumo = async (req, res, next) => {
 
     // Calcular kWh y monto con la tarifa configurada en la asociación
     const kwh_consumidos = lectura_actual - lectura_anterior;
-    const asoc = await Asociacion.findByPk(id_asociacion);
+    const asoc = await Asociacion.findByPk(id_asociacion, { transaction });
     const PRECIO_KWH = asoc?.precio_kwh ? parseFloat(asoc.precio_kwh) : 2.0;
     const monto_calculado = parseFloat((kwh_consumidos * PRECIO_KWH).toFixed(2));
 
     // Crear el registro de consumo
-    const consumo = await ConsumoLuz.create({
-      id_socio,
-      mes_anio,
-      lectura_anterior,
-      lectura_actual,
-      kwh_consumidos,
-      monto_calculado,
-      fecha_lectura,
-      id_usuario_registro: id_usuario,
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
+    const consumo = await ConsumoLuz.create(
+      {
+        id_socio,
+        mes_anio,
+        lectura_anterior,
+        lectura_actual,
+        kwh_consumidos,
+        monto_calculado,
+        fecha_lectura,
+        id_usuario_registro: id_usuario,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      { transaction }
+    );
 
-    // Buscar concepto de cobro 'Luz' para esta asociación
-    let conceptoLuz = await ConceptoCobro.findOne({
+    // Buscar o crear concepto de cobro 'Luz' para esta asociación
+    const [conceptoLuz] = await ConceptoCobro.findOrCreate({
       where: { id_asociacion, nombre_concepto: 'Luz', deleted_at: null },
-    });
-
-    if (!conceptoLuz) {
-      conceptoLuz = await ConceptoCobro.create({
+      defaults: {
         id_asociacion,
         nombre_concepto: 'Luz',
         monto_fijo: null,
@@ -118,29 +144,33 @@ const registrarConsumo = async (req, res, next) => {
         dias_gracia: 10,
         created_at: new Date(),
         updated_at: new Date(),
-      });
-    }
+      },
+      transaction,
+    });
 
     const [anioStr, mesStr] = mes_anio.split('-');
     const fechaVencimiento = new Date(parseInt(anioStr), parseInt(mesStr), 15);
 
     // Crear cargo de luz del mes
-    const cargoLuz = await Cargo.create({
-      id_socio,
-      id_asociacion,
-      id_concepto: conceptoLuz.id_concepto,
-      id_referencia_origen: consumo.id_consumo,
-      tipo_origen: 'luz',
-      periodo: mes_anio,
-      detalle: `Consumo Luz ${mes_anio}: ${kwh_consumidos.toFixed(2)} kWh`,
-      monto_capital_inicial: monto_calculado,
-      saldo_capital_pendiente: monto_calculado,
-      monto_mora_acumulada: 0,
-      fecha_vencimiento: fechaVencimiento,
-      estado: 'Pendiente',
-      created_at: new Date(),
-      updated_at: new Date(),
-    });
+    const cargoLuz = await Cargo.create(
+      {
+        id_socio,
+        id_asociacion,
+        id_concepto: conceptoLuz.id_concepto,
+        id_referencia_origen: consumo.id_consumo,
+        tipo_origen: 'luz',
+        periodo: mes_anio,
+        detalle: `Consumo Luz ${mes_anio}: ${kwh_consumidos.toFixed(2)} kWh`,
+        monto_capital_inicial: monto_calculado,
+        saldo_capital_pendiente: monto_calculado,
+        monto_mora_acumulada: 0,
+        fecha_vencimiento: fechaVencimiento,
+        estado: 'Pendiente',
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+      { transaction }
+    );
 
     // ─── REGLA: 3er MES SIN PAGAR LA LUZ (APLICACIÓN AUTOMÁTICA DE MULTA POR MORA) ───
     const cargosLuzImpagos = await Cargo.findAll({
@@ -151,6 +181,7 @@ const registrarConsumo = async (req, res, next) => {
         estado: { [Op.in]: ['Pendiente', 'Pagado_Parcial'] },
         deleted_at: null,
       },
+      transaction,
     });
 
     let multaGenerada = null;
@@ -163,13 +194,14 @@ const registrarConsumo = async (req, res, next) => {
         defaults: {
           id_asociacion,
           nombre_concepto: 'Multa Mora Luz',
-          monto_fijo: 20.00,
+          monto_fijo: 20.0,
           aplica_mora: false,
           tasa_mora_mensual: 0,
           dias_gracia: 0,
           created_at: new Date(),
           updated_at: new Date(),
         },
+        transaction,
       });
 
       const yaTieneMulta = await Cargo.findOne({
@@ -180,28 +212,34 @@ const registrarConsumo = async (req, res, next) => {
           periodo: mes_anio,
           deleted_at: null,
         },
+        transaction,
       });
 
       if (!yaTieneMulta) {
-        multaGenerada = await Cargo.create({
-          id_socio,
-          id_asociacion,
-          id_concepto: conceptoMoraLuz.id_concepto,
-          tipo_origen: 'mora_luz',
-          periodo: mes_anio,
-          detalle: `Multa por Mora en Consumo de Luz (${cargosLuzImpagos.length} meses acumulados sin pagar)`,
-          monto_capital_inicial: 20.00,
-          saldo_capital_pendiente: 20.00,
-          monto_mora_acumulada: 0,
-          fecha_vencimiento: fechaVencimiento,
-          estado: 'Pendiente',
-          created_at: new Date(),
-          updated_at: new Date(),
-        });
+        multaGenerada = await Cargo.create(
+          {
+            id_socio,
+            id_asociacion,
+            id_concepto: conceptoMoraLuz.id_concepto,
+            tipo_origen: 'mora_luz',
+            periodo: mes_anio,
+            detalle: `Multa por Mora en Consumo de Luz (${cargosLuzImpagos.length} meses acumulados sin pagar)`,
+            monto_capital_inicial: 20.0,
+            saldo_capital_pendiente: 20.0,
+            monto_mora_acumulada: 0,
+            fecha_vencimiento: fechaVencimiento,
+            estado: 'Pendiente',
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+          { transaction }
+        );
 
         mensajeMora = `¡Atención! Este es el ${cargosLuzImpagos.length}° mes consecutivo sin pagar luz. Se ha aplicado automáticamente una Multa por Mora de 20.00 Bs a la cuenta del socio.`;
       }
     }
+
+    await transaction.commit();
 
     return res.status(201).json({
       mensaje: mensajeMora || 'Consumo registrado y cargo generado exitosamente.',
@@ -211,33 +249,45 @@ const registrarConsumo = async (req, res, next) => {
       total_meses_impagos_luz: cargosLuzImpagos.length,
     });
   } catch (error) {
+    await transaction.rollback();
     next(error);
   }
 };
 
 /**
  * getConsumos: listar consumos de la asociación, filtrable por mes_anio
+ * Optimizado con INNER JOIN para resolver en 1 sola consulta SQL.
  */
 const getConsumos = async (req, res, next) => {
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const { mes_anio } = req.query;
 
-    // Obtener socios de la asociación
-    const socios = await Socio.findAll({
-      where: { id_asociacion, deleted_at: null },
-      attributes: ['id_socio'],
-    });
-    const idsSocios = socios.map(s => s.id_socio);
-
-    const filtro = { id_socio: { [Op.in]: idsSocios }, deleted_at: null };
+    const filtro = { deleted_at: null };
     if (mes_anio) filtro.mes_anio = mes_anio;
 
     const consumos = await ConsumoLuz.findAll({
       where: filtro,
-      include: [{ model: Socio, as: 'socio', include: [{ model: Persona, as: 'persona' }] }],
+      include: [
+        {
+          model: Socio,
+          as: 'socio',
+          where: { id_asociacion, deleted_at: null },
+          required: true,
+          include: [{ model: Persona, as: 'persona' }],
+        },
+      ],
       order: [['fecha_lectura', 'DESC']],
     });
+
     return res.status(200).json({ consumos });
   } catch (error) {
     next(error);
@@ -250,9 +300,18 @@ const getConsumos = async (req, res, next) => {
 const getConsumoSocio = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
 
-    const socio = await Socio.findOne({ where: { id_socio: id, id_asociacion, deleted_at: null } });
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
+    const socio = await Socio.findOne({
+      where: { id_socio: id, id_asociacion, deleted_at: null },
+    });
     if (!socio) return res.status(404).json({ mensaje: 'Socio no encontrado.' });
 
     const consumos = await ConsumoLuz.findAll({
@@ -270,7 +329,15 @@ const getConsumoSocio = async (req, res, next) => {
  */
 const getTarifaLuz = async (req, res, next) => {
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const asoc = await Asociacion.findByPk(id_asociacion);
     const tarifa = asoc?.precio_kwh ? parseFloat(asoc.precio_kwh) : 2.0;
     return res.status(200).json({ precio_kwh: tarifa });
@@ -280,4 +347,5 @@ const getTarifaLuz = async (req, res, next) => {
 };
 
 module.exports = { registrarConsumo, getConsumos, getConsumoSocio, getTarifaLuz };
+
 

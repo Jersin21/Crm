@@ -8,6 +8,7 @@ import toastOptions from "../utils/toastOptions";
 import theme from "../styles/theme";
 import Modal from "../components/Modal";
 import ConfirmModal from "../components/ConfirmModal";
+import { Hammer, Clock, Users, AlertTriangle, Trash2, CheckCircle2, Zap, Hourglass } from "lucide-react";
 import {
   PageContainer,
   ContentContainer,
@@ -101,7 +102,7 @@ const Label = styled.label`
 const Input = styled.input`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -110,9 +111,16 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    box-shadow: 0 0 0 3px ${({ $hasError }) => ($hasError ? "rgba(239, 68, 68, 0.2)" : "rgba(14, 165, 233, 0.15)")};
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
 `;
 
 const Textarea = styled.textarea`
@@ -165,6 +173,15 @@ const estadoInicial = {
   monto_multa_mora: "20.00",
 };
 
+const confirmModalInitial = {
+  isOpen: false,
+  title: "",
+  message: "",
+  confirmText: "Confirmar",
+  onConfirm: null,
+  loading: false,
+};
+
 function AportesPage() {
   const { auth } = useAuth();
   const [aportes, setAportes] = useState([]);
@@ -173,6 +190,7 @@ function AportesPage() {
   const [modalCrearAbierto, setModalCrearAbierto] = useState(false);
   const [formData, setFormData] = useState(estadoInicial);
   const [guardando, setGuardando] = useState(false);
+  const [errors, setErrors] = useState({});
 
   // Modal detalle de socios
   const [modalSociosAbierto, setModalSociosAbierto] = useState(false);
@@ -181,23 +199,42 @@ function AportesPage() {
   const [cargandoSocios, setCargandoSocios] = useState(false);
   const [filtroSocioEstado, setFiltroSocioEstado] = useState("todos");
 
-  // Estado del modal de confirmación personalizado (sin alertas nativas de navegador)
-  const [confirmModalData, setConfirmModalData] = useState({
-    isOpen: false,
-    title: "",
-    message: "",
-    confirmText: "Confirmar",
-    onConfirm: null,
-    loading: false,
-  });
+  // Estado del modal de confirmación personalizado
+  const [confirmModalData, setConfirmModalData] = useState(confirmModalInitial);
+
+  const validateForm = () => {
+    const newErrors = {};
+    if (!formData.nombre_proyecto || formData.nombre_proyecto.trim().length < 3) {
+      newErrors.nombre_proyecto = "El nombre del proyecto es obligatorio (mínimo 3 caracteres)";
+    }
+    const montoNum = parseFloat(formData.monto_por_socio);
+    if (!formData.monto_por_socio || isNaN(montoNum) || montoNum <= 0) {
+      newErrors.monto_por_socio = "Ingrese un monto mayor a 0 Bs";
+    }
+    const moraNum = parseFloat(formData.monto_multa_mora);
+    if (formData.monto_multa_mora !== "" && (isNaN(moraNum) || moraNum < 0)) {
+      newErrors.monto_multa_mora = "La multa no puede ser negativa";
+    }
+    if (!formData.fecha_emision) {
+      newErrors.fecha_emision = "La fecha de emisión es obligatoria";
+    }
+    if (formData.fecha_limite && formData.fecha_emision && formData.fecha_limite < formData.fecha_emision) {
+      newErrors.fecha_limite = "La fecha límite no puede ser anterior a la emisión";
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const fetchAportes = async () => {
     try {
       setLoading(true);
       const { data } = await axios.get(aportesRoute, auth.config);
-      setAportes(Array.isArray(data.aportes) ? data.aportes : []);
+      setAportes(Array.isArray(data.aportes) ? data.aportes : Array.isArray(data) ? data : []);
     } catch (err) {
-      toast.error("Error al cargar los proyectos de aportes", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar los proyectos de aportes",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -215,9 +252,9 @@ function AportesPage() {
 
     aportes.forEach((ap) => {
       const m = ap.metricas || {};
-      totalMeta += m.meta_total || 0;
-      totalRecaudado += m.total_recaudado || 0;
-      totalPendiente += m.total_pendiente || 0;
+      totalMeta += Number(m.meta_total) || 0;
+      totalRecaudado += Number(m.total_recaudado) || 0;
+      totalPendiente += Number(m.total_pendiente) || 0;
     });
 
     const porcentajeGlobal = totalMeta > 0 ? (totalRecaudado / totalMeta) * 100 : 0;
@@ -231,32 +268,39 @@ function AportesPage() {
     };
   }, [aportes]);
 
-  const aportesFiltrados = aportes.filter((ap) =>
-    (ap.nombre_proyecto || "").toLowerCase().includes(busqueda.toLowerCase()) ||
-    (ap.descripcion || "").toLowerCase().includes(busqueda.toLowerCase())
-  );
+  const aportesFiltrados = aportes.filter((ap) => {
+    const q = busqueda.trim().toLowerCase();
+    const nombre = (ap.nombre_proyecto || "").toLowerCase();
+    const desc = (ap.descripcion || "").toLowerCase();
+    return nombre.includes(q) || desc.includes(q);
+  });
 
   const handleSubmitCrear = async (e) => {
     e.preventDefault();
-    if (!formData.nombre_proyecto.trim() || !formData.monto_por_socio || !formData.fecha_emision) {
-      toast.error("Completa los campos obligatorios", toastOptions);
+    if (!validateForm()) {
+      toast.error("Por favor completa los campos requeridos correctamente", toastOptions);
       return;
     }
+
+    const montoNum = parseFloat(formData.monto_por_socio);
+    const moraNum = formData.monto_multa_mora !== "" ? parseFloat(formData.monto_multa_mora) : 20.00;
+
     try {
       setGuardando(true);
       const payload = {
         nombre_proyecto: formData.nombre_proyecto.trim(),
-        descripcion: formData.descripcion.trim(),
-        monto_por_socio: parseFloat(formData.monto_por_socio),
+        descripcion: (formData.descripcion || "").trim(),
+        monto_por_socio: montoNum,
         fecha_emision: formData.fecha_emision,
         fecha_limite: formData.fecha_limite || undefined,
-        monto_multa_mora: formData.monto_multa_mora ? parseFloat(formData.monto_multa_mora) : 20.00,
+        monto_multa_mora: moraNum,
       };
 
       const { data } = await axios.post(aportesRoute, payload, auth.config);
       toast.success(data.mensaje || "Aporte Pro-Mejora registrado con éxito", toastOptions);
       setModalCrearAbierto(false);
       setFormData(estadoInicial);
+      setErrors({});
       fetchAportes();
     } catch (err) {
       toast.error(err.response?.data?.mensaje || "Error al crear el proyecto", toastOptions);
@@ -271,9 +315,12 @@ function AportesPage() {
       setModalSociosAbierto(true);
       setCargandoSocios(true);
       const { data } = await axios.get(aportesSociosRoute(aporte.id_aporte), auth.config);
-      setSociosDetalle(data.socios || []);
+      setSociosDetalle(Array.isArray(data.socios) ? data.socios : []);
     } catch (err) {
-      toast.error("Error al cargar la lista de socios del proyecto", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar la lista de socios del proyecto",
+        toastOptions
+      );
     } finally {
       setCargandoSocios(false);
     }
@@ -294,7 +341,7 @@ function AportesPage() {
             auth.config
           );
           toast.success(data.mensaje || "Multas por mora aplicadas correctamente", toastOptions);
-          setConfirmModalData({ isOpen: false });
+          setConfirmModalData(confirmModalInitial);
           fetchAportes();
           if (modalSociosAbierto && aporteSeleccionado?.id_aporte === aporte.id_aporte) {
             handleVerSocios(aporte);
@@ -318,7 +365,7 @@ function AportesPage() {
           setConfirmModalData((prev) => ({ ...prev, loading: true }));
           const { data } = await axios.delete(`${aportesRoute}/${aporte.id_aporte}`, auth.config);
           toast.success(data.mensaje || "Proyecto anulado", toastOptions);
-          setConfirmModalData({ isOpen: false });
+          setConfirmModalData(confirmModalInitial);
           fetchAportes();
         } catch (err) {
           toast.error(err.response?.data?.mensaje || "Error al anular proyecto", toastOptions);
@@ -341,13 +388,15 @@ function AportesPage() {
       <ContentContainer>
         <SectionHeader>
           <div className="titles">
-            <h1>🏗️ Aportes Pro-Mejoras (Obras y Proyectos del Mercado)</h1>
+            <h1 style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Hammer size={22} /> Aportes Pro-Mejoras (Obras y Proyectos del Mercado)
+            </h1>
             <p>
               Proyectos especiales (cerámica de pisos, compra de extintores, techos) financiados con cobro único y sanción de mora si pasan 2 meses.
             </p>
           </div>
           <div className="actions">
-            <CreateButton onClick={() => setModalCrearAbierto(true)}>
+            <CreateButton onClick={() => { setErrors({}); setFormData(estadoInicial); setModalCrearAbierto(true); }}>
               + Nuevo Proyecto Pro-Mejora
             </CreateButton>
           </div>
@@ -445,15 +494,15 @@ function AportesPage() {
                           )}
                         </TableCell>
                         <TableCell style={{ fontWeight: 700, color: theme.colors.primary }}>
-                          {parseFloat(ap.monto_por_socio).toFixed(2)} Bs
+                          {parseFloat(ap.monto_por_socio || 0).toFixed(2)} Bs
                         </TableCell>
                         <TableCell style={{ minWidth: "170px" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", marginBottom: "0.25rem" }}>
                             <span style={{ fontWeight: 700, color: theme.colors.success }}>
-                              {m.total_recaudado?.toFixed(2) || "0.00"} Bs
+                              {Number(m.total_recaudado || 0).toFixed(2)} Bs
                             </span>
                             <span style={{ color: theme.colors.textMuted }}>
-                              de {m.meta_total?.toFixed(2) || "0.00"} Bs ({pct}%)
+                              de {Number(m.meta_total || 0).toFixed(2)} Bs ({pct}%)
                             </span>
                           </div>
                           <ProgressBarContainer>
@@ -472,11 +521,11 @@ function AportesPage() {
                         <TableCell>
                           {ap.vencido_dos_meses ? (
                             <div>
-                              <StatusBadge $status="Suspendido">
-                                ⏰ +2 Meses ({ap.dias_transcurridos} días)
+                              <StatusBadge $status="Suspendido" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                <Clock size={12} /> +2 Meses ({ap.dias_transcurridos} días)
                               </StatusBadge>
                               <div style={{ fontSize: "0.72rem", color: theme.colors.danger, marginTop: "0.2rem" }}>
-                                Multa: +{parseFloat(ap.monto_multa_mora).toFixed(2)} Bs
+                                Multa: +{parseFloat(ap.monto_multa_mora || 0).toFixed(2)} Bs
                                 {m.multas_mora_aplicadas > 0 && ` (${m.multas_mora_aplicadas} aplicadas)`}
                               </div>
                             </div>
@@ -486,7 +535,7 @@ function AportesPage() {
                                 En Plazo ({ap.dias_transcurridos}/60 días)
                               </StatusBadge>
                               <div style={{ fontSize: "0.72rem", color: theme.colors.textDim, marginTop: "0.2rem" }}>
-                                Mora tras 2 meses: {parseFloat(ap.monto_multa_mora).toFixed(2)} Bs
+                                Mora tras 2 meses: {parseFloat(ap.monto_multa_mora || 0).toFixed(2)} Bs
                               </div>
                             </div>
                           )}
@@ -497,20 +546,20 @@ function AportesPage() {
                           </StatusBadge>
                         </TableCell>
                         <TableCell>
-                          <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
-                            <ViewButton onClick={() => handleVerSocios(ap)}>
-                              👥 Socios ({m.socios_pagaron}/{m.total_socios})
+                          <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+                            <ViewButton onClick={() => handleVerSocios(ap)} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <Users size={13} /> Socios ({m.socios_pagaron || 0}/{m.total_socios || 0})
                             </ViewButton>
                             {ap.vencido_dos_meses && m.socios_pendientes > 0 && (
                               <ActionButton
                                 onClick={() => handleAplicarMora(ap)}
-                                style={{ backgroundColor: "#ef4444", color: "#fff" }}
+                                style={{ backgroundColor: "#ef4444", color: "#fff", display: "inline-flex", alignItems: "center", gap: "4px" }}
                               >
-                                ⚠️ Aplicar Mora
+                                <AlertTriangle size={13} /> Aplicar Mora
                               </ActionButton>
                             )}
-                            <DeleteButton onClick={() => handleEliminar(ap)}>
-                              🗑️ Anular
+                            <DeleteButton onClick={() => handleEliminar(ap)} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <Trash2 size={13} /> Anular
                             </DeleteButton>
                           </div>
                         </TableCell>
@@ -528,7 +577,7 @@ function AportesPage() {
       <Modal
         isOpen={modalCrearAbierto}
         onClose={() => setModalCrearAbierto(false)}
-        title="🏗️ Nuevo Proyecto / Aporte Pro-Mejora"
+        title="Nuevo Proyecto / Aporte Pro-Mejora"
         maxWidth="580px"
       >
         <form onSubmit={handleSubmitCrear}>
@@ -538,9 +587,13 @@ function AportesPage() {
               name="nombre_proyecto"
               placeholder="Ej. Instalación de Cerámica en Pasillos / Extintores de Incendio"
               value={formData.nombre_proyecto}
-              onChange={(e) => setFormData({ ...formData, nombre_proyecto: e.target.value })}
-              required
+              $hasError={!!errors.nombre_proyecto}
+              onChange={(e) => {
+                setFormData({ ...formData, nombre_proyecto: e.target.value });
+                if (errors.nombre_proyecto) setErrors((prev) => ({ ...prev, nombre_proyecto: undefined }));
+              }}
             />
+            {errors.nombre_proyecto && <ErrorText>{errors.nombre_proyecto}</ErrorText>}
           </FormGroup>
 
           <FormGroup>
@@ -562,12 +615,19 @@ function AportesPage() {
                 min="1"
                 placeholder="Ej. 50.00"
                 value={formData.monto_por_socio}
-                onChange={(e) => setFormData({ ...formData, monto_por_socio: e.target.value })}
-                required
+                $hasError={!!errors.monto_por_socio}
+                onChange={(e) => {
+                  setFormData({ ...formData, monto_por_socio: e.target.value });
+                  if (errors.monto_por_socio) setErrors((prev) => ({ ...prev, monto_por_socio: undefined }));
+                }}
               />
-              <span style={{ fontSize: "0.72rem", color: theme.colors.textMuted }}>
-                Se generará una cuota individual a cada socio activo.
-              </span>
+              {errors.monto_por_socio ? (
+                <ErrorText>{errors.monto_por_socio}</ErrorText>
+              ) : (
+                <span style={{ fontSize: "0.72rem", color: theme.colors.textMuted }}>
+                  Se generará una cuota individual a cada socio activo.
+                </span>
+              )}
             </FormGroup>
 
             <FormGroup>
@@ -578,12 +638,19 @@ function AportesPage() {
                 min="0"
                 placeholder="Ej. 20.00"
                 value={formData.monto_multa_mora}
-                onChange={(e) => setFormData({ ...formData, monto_multa_mora: e.target.value })}
-                required
+                $hasError={!!errors.monto_multa_mora}
+                onChange={(e) => {
+                  setFormData({ ...formData, monto_multa_mora: e.target.value });
+                  if (errors.monto_multa_mora) setErrors((prev) => ({ ...prev, monto_multa_mora: undefined }));
+                }}
               />
-              <span style={{ fontSize: "0.72rem", color: theme.colors.textMuted }}>
-                Sanción automática que se cargará tras 60 días de atraso.
-              </span>
+              {errors.monto_multa_mora ? (
+                <ErrorText>{errors.monto_multa_mora}</ErrorText>
+              ) : (
+                <span style={{ fontSize: "0.72rem", color: theme.colors.textMuted }}>
+                  Sanción automática que se cargará tras 60 días de atraso.
+                </span>
+              )}
             </FormGroup>
           </div>
 
@@ -593,9 +660,13 @@ function AportesPage() {
               <Input
                 type="date"
                 value={formData.fecha_emision}
-                onChange={(e) => setFormData({ ...formData, fecha_emision: e.target.value })}
-                required
+                $hasError={!!errors.fecha_emision}
+                onChange={(e) => {
+                  setFormData({ ...formData, fecha_emision: e.target.value });
+                  if (errors.fecha_emision) setErrors((prev) => ({ ...prev, fecha_emision: undefined }));
+                }}
               />
+              {errors.fecha_emision && <ErrorText>{errors.fecha_emision}</ErrorText>}
             </FormGroup>
 
             <FormGroup>
@@ -603,11 +674,19 @@ function AportesPage() {
               <Input
                 type="date"
                 value={formData.fecha_limite}
-                onChange={(e) => setFormData({ ...formData, fecha_limite: e.target.value })}
+                $hasError={!!errors.fecha_limite}
+                onChange={(e) => {
+                  setFormData({ ...formData, fecha_limite: e.target.value });
+                  if (errors.fecha_limite) setErrors((prev) => ({ ...prev, fecha_limite: undefined }));
+                }}
               />
-              <span style={{ fontSize: "0.72rem", color: theme.colors.textMuted }}>
-                (Opcional, por defecto 60 días tras la emisión)
-              </span>
+              {errors.fecha_limite ? (
+                <ErrorText>{errors.fecha_limite}</ErrorText>
+              ) : (
+                <span style={{ fontSize: "0.72rem", color: theme.colors.textMuted }}>
+                  (Opcional, por defecto 60 días tras la emisión)
+                </span>
+              )}
             </FormGroup>
           </div>
 
@@ -629,7 +708,7 @@ function AportesPage() {
         title={
           aporteSeleccionado
             ? `Estado de Cobro - ${aporteSeleccionado.nombre_proyecto} (${parseFloat(
-                aporteSeleccionado.monto_por_socio
+                aporteSeleccionado.monto_por_socio || 0
               ).toFixed(2)} Bs)`
             : "Estado de Cobro de Socios"
         }
@@ -666,10 +745,13 @@ function AportesPage() {
                     cursor: "pointer",
                     fontSize: "0.8rem",
                     fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
                   }}
                   onClick={() => setFiltroSocioEstado("pagados")}
                 >
-                  ✅ Pagados ({sociosDetalle.filter((s) => s.esta_pagado).length})
+                  <CheckCircle2 size={13} /> Pagados ({sociosDetalle.filter((s) => s.esta_pagado).length})
                 </button>
                 <button
                   type="button"
@@ -682,19 +764,22 @@ function AportesPage() {
                     cursor: "pointer",
                     fontSize: "0.8rem",
                     fontWeight: 600,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "4px",
                   }}
                   onClick={() => setFiltroSocioEstado("pendientes")}
                 >
-                  ⏳ Pendientes ({sociosDetalle.filter((s) => !s.esta_pagado).length})
+                  <Hourglass size={13} /> Pendientes ({sociosDetalle.filter((s) => !s.esta_pagado).length})
                 </button>
               </div>
 
               {aporteSeleccionado.vencido_dos_meses && (
                 <ActionButton
                   onClick={() => handleAplicarMora(aporteSeleccionado)}
-                  style={{ backgroundColor: "#ef4444", color: "#fff", fontSize: "0.75rem", padding: "0.4rem 0.75rem" }}
+                  style={{ backgroundColor: "#ef4444", color: "#fff", fontSize: "0.75rem", padding: "0.4rem 0.75rem", display: "inline-flex", alignItems: "center", gap: "4px" }}
                 >
-                  ⚡ Aplicar Multa de Mora (+2 meses)
+                  <Zap size={13} /> Aplicar Multa de Mora (+2 meses)
                 </ActionButton>
               )}
             </div>
@@ -732,14 +817,14 @@ function AportesPage() {
                         <TableCell>
                           <strong>{s.nombre_completo}</strong>
                           <div style={{ fontSize: "0.72rem", color: theme.colors.textMuted }}>
-                            CI: {s.ci} | Cel: {s.telefono}
+                            CI: {s.ci || "-"} | Cel: {s.telefono || "-"}
                           </div>
                         </TableCell>
-                        <TableCell>{s.monto_cuota.toFixed(2)} Bs</TableCell>
+                        <TableCell>{Number(s.monto_cuota || 0).toFixed(2)} Bs</TableCell>
                         <TableCell>
                           {s.tiene_mora_aplicada ? (
                             <span style={{ color: "#ef4444", fontWeight: 700, fontSize: "0.8rem" }}>
-                              +{s.monto_mora.toFixed(2)} Bs (Multa Mora)
+                              +{Number(s.monto_mora || 0).toFixed(2)} Bs (Multa Mora)
                             </span>
                           ) : (
                             <span style={{ color: theme.colors.textDim, fontSize: "0.75rem" }}>
@@ -765,7 +850,7 @@ function AportesPage() {
       {/* Modal de confirmación para anulación */}
       <ConfirmModal
         isOpen={confirmModalData.isOpen}
-        onClose={() => setConfirmModalData({ ...confirmModalData, isOpen: false })}
+        onClose={() => setConfirmModalData(confirmModalInitial)}
         title={confirmModalData.title}
         message={confirmModalData.message}
         confirmText={confirmModalData.confirmText}

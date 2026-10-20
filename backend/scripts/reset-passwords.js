@@ -3,12 +3,18 @@ const bcrypt = require('bcrypt');
 const { QueryTypes } = require('sequelize');
 
 async function run() {
-  const hash = await bcrypt.hash('misocios2024', 10);
+  if (process.env.NODE_ENV === 'production' && process.env.FORCE_RESET !== 'true') {
+    console.error('⛔ SEGURIDAD: reset-passwords está bloqueado en entorno de producción sin FORCE_RESET=true');
+    process.exit(1);
+  }
+
+  const newPass = process.env.RESET_TO_PASSWORD || 'misocios2024';
+  const hash = await bcrypt.hash(newPass, 10);
   await db.query(
     'UPDATE usuarios SET password = ?, intentos_fallidos = 0, bloqueado_hasta = NULL WHERE deleted_at IS NULL',
     { replacements: [hash], type: QueryTypes.UPDATE }
   );
-  console.log('Passwords reset to: misocios2024');
+  console.log('Contraseñas restablecidas correctamente.');
 
   const users = await db.query(
     'SELECT id_usuario, username, rol, id_asociacion FROM usuarios WHERE deleted_at IS NULL ORDER BY id_usuario',
@@ -19,4 +25,8 @@ async function run() {
   process.exit(0);
 }
 
-run().catch(e => { console.error(e.message); process.exit(1); });
+if (require.main === module) {
+  run().catch(e => { console.error(e.message); process.exit(1); });
+}
+
+module.exports = { run };

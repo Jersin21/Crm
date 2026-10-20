@@ -3,6 +3,20 @@ import styled from "styled-components";
 import Logout from "./Logout";
 import useAuth from "../hooks/authHooks";
 import { NavLink, Link } from "react-router-dom";
+import {
+  Menu,
+  Home,
+  Users,
+  CreditCard,
+  DollarSign,
+  TrendingDown,
+  Hammer,
+  Zap,
+  FileText,
+  Calendar,
+  Settings,
+  UserCheck
+} from "lucide-react";
 import ROLES from "../utils/roles";
 import theme from "../styles/theme";
 import LogoImg from "../assets/logo.svg";
@@ -259,7 +273,9 @@ const Sidebar = () => {
             MiSocios
           </span>
         </Link>
-        <MenuButton onClick={() => setIsMobileOpen(!isMobileOpen)}>☰</MenuButton>
+        <MenuButton onClick={() => setIsMobileOpen(!isMobileOpen)}>
+          <Menu size={20} />
+        </MenuButton>
       </MobileHeader>
 
       <Backdrop $isOpen={isMobileOpen} onClick={closeMenu} />
@@ -295,11 +311,11 @@ const Sidebar = () => {
           <NavGroup>
             <NavGroupLabel>General</NavGroupLabel>
             <StyledNavLink to="/" end onClick={closeMenu}>
-              <span>🏠</span>
+              <Home size={18} />
               <span>Inicio</span>
             </StyledNavLink>
             <StyledNavLink to="/socios" onClick={closeMenu}>
-              <span>👥</span>
+              <Users size={18} />
               <span>Socios</span>
             </StyledNavLink>
           </NavGroup>
@@ -309,28 +325,39 @@ const Sidebar = () => {
             <NavGroup>
               <NavGroupLabel>Caja y Finanzas</NavGroupLabel>
               <StyledNavLink to="/caja" onClick={closeMenu}>
-                <span>💳</span>
+                <CreditCard size={18} />
                 <span>Caja y Cobranza (Luz, Serenaje, Multas)</span>
               </StyledNavLink>
               <StyledNavLink to="/ingresos" onClick={closeMenu}>
-                <span>💰</span>
+                <DollarSign size={18} />
                 <span>Ingresos (Traspasos 10%, Afiliación)</span>
               </StyledNavLink>
               <StyledNavLink to="/egresos" onClick={closeMenu}>
-                <span>💸</span>
+                <TrendingDown size={18} />
                 <span>Egresos y Gastos</span>
               </StyledNavLink>
               <StyledNavLink to="/aportes" onClick={closeMenu}>
-                <span>🏗️</span>
+                <Hammer size={18} />
                 <span>Aportes Pro-Mejoras</span>
               </StyledNavLink>
               <StyledNavLink to="/consumo-luz" onClick={closeMenu}>
-                <span>💡</span>
+                <Zap size={18} />
                 <span>Toma y Lecturas de Luz</span>
               </StyledNavLink>
               <StyledNavLink to="/reportes" onClick={closeMenu}>
-                <span>📋</span>
+                <FileText size={18} />
                 <span>Reportes y Balance</span>
+              </StyledNavLink>
+            </NavGroup>
+          )}
+
+          {/* Módulo Servicios y Medidores - Exclusivo para LECTURADOR */}
+          {role === ROLES.LECTURADOR && (
+            <NavGroup>
+              <NavGroupLabel>Servicios y Medidores</NavGroupLabel>
+              <StyledNavLink to="/consumo-luz" onClick={closeMenu}>
+                <Zap size={18} />
+                <span>Toma y Lecturas de Luz</span>
               </StyledNavLink>
             </NavGroup>
           )}
@@ -340,7 +367,7 @@ const Sidebar = () => {
             <NavGroup>
               <NavGroupLabel>Organización</NavGroupLabel>
               <StyledNavLink to="/eventos" onClick={closeMenu}>
-                <span>📅</span>
+                <Calendar size={18} />
                 <span>Eventos y Asambleas</span>
               </StyledNavLink>
             </NavGroup>
@@ -351,11 +378,11 @@ const Sidebar = () => {
             <NavGroup>
               <NavGroupLabel>Administración</NavGroupLabel>
               <StyledNavLink to="/configuracion" onClick={closeMenu}>
-                <span>⚙️</span>
+                <Settings size={18} />
                 <span>Configuración y Tarifas</span>
               </StyledNavLink>
               <StyledNavLink to="/usuarios" onClick={closeMenu}>
-                <span>👤</span>
+                <UserCheck size={18} />
                 <span>Directiva y Usuarios</span>
               </StyledNavLink>
             </NavGroup>

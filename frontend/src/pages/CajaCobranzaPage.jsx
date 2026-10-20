@@ -3,7 +3,29 @@ import styled from "styled-components";
 import axios from "axios";
 import { toast } from "react-toastify";
 import { PDFDownloadLink } from "@react-pdf/renderer";
-import { Link } from "react-router-dom";
+import {
+  CreditCard,
+  Receipt,
+  Tag,
+  CheckCircle2,
+  Building,
+  Zap,
+  Globe,
+  FileText,
+  Printer,
+  Calculator,
+  Check,
+  X,
+  ShieldCheck,
+  AlertTriangle,
+  Hammer,
+  Pin,
+  Plus,
+  CheckCircle,
+  Info,
+  UserCheck,
+  DollarSign,
+} from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import useAuth from "../hooks/authHooks";
 import useDebounce from "../hooks/useDebounce";
@@ -25,12 +47,12 @@ import {
   TableBody,
   TableRow,
   TableCell,
-  StatusBadge,
   CreateButton,
   ViewButton,
   DeleteButton,
   ActionButton,
   SearchInput,
+  StatusBadge,
 } from "../styles/commonStyles";
 import {
   ingresosRoute,
@@ -114,13 +136,18 @@ const Label = styled.label`
 const Select = styled.select`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
   width: 100%;
   box-sizing: border-box;
   cursor: pointer;
+
+  &:focus {
+    outline: none;
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+  }
 
   option {
     background-color: ${theme.colors.bgCard};
@@ -130,7 +157,7 @@ const Select = styled.select`
 const Input = styled.input`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -139,8 +166,16 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    box-shadow: 0 0 0 2px ${({ $hasError }) => ($hasError ? "rgba(239, 68, 68, 0.2)" : "rgba(14, 165, 233, 0.2)")};
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
 `;
 
 const Textarea = styled.textarea`
@@ -319,18 +354,28 @@ const PaymentSummaryBox = styled.div`
   }
 `;
 
+const confirmModalInitial = {
+  isOpen: false,
+  title: "",
+  message: "",
+  confirmText: "Confirmar",
+  requireReason: false,
+  reasonPlaceholder: "",
+  onConfirm: null,
+  loading: false,
+};
+
 function CajaCobranzaPage() {
   const { auth } = useAuth();
 
   // Estados principales
-  const [vistaActiva, setVistaActiva] = useState("deudas"); // "deudas" | "recibos"
+  const [vistaActiva, setVistaActiva] = useState("deudas");
   const [resumenSocios, setResumenSocios] = useState([]);
   const [recibos, setRecibos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
-  // Modo Tostadora: debounce de 300ms para evitar congelar el procesador al escribir en cajas de búsqueda
   const debouncedBusqueda = useDebounce(busqueda, 300);
-  const [filtroDeuda, setFiltroDeuda] = useState("todas"); // "todas" | "con_deuda" | "al_dia"
+  const [filtroDeuda, setFiltroDeuda] = useState("todas");
 
   // Estados de Modales
   const [modalCobroAbierto, setModalCobroAbierto] = useState(false);
@@ -344,18 +389,9 @@ function CajaCobranzaPage() {
   const [modalReciboExito, setModalReciboExito] = useState(false);
 
   // Modal moderno de confirmación / anulación
-  const [confirmModalData, setConfirmModalData] = useState({
-    isOpen: false,
-    title: "",
-    message: "",
-    confirmText: "Confirmar",
-    requireReason: false,
-    reasonPlaceholder: "",
-    onConfirm: null,
-    loading: false,
-  });
+  const [confirmModalData, setConfirmModalData] = useState(confirmModalInitial);
 
-  // Estados para Registro de Ingreso Directo (Traspaso 10%, Afiliación, etc.)
+  // Estados para Registro de Ingreso Directo
   const [modalDirectoAbierto, setModalDirectoAbierto] = useState(false);
   const [guardandoDirecto, setGuardandoDirecto] = useState(false);
   const [formDirecto, setFormDirecto] = useState({
@@ -379,16 +415,18 @@ function CajaCobranzaPage() {
         axios.get(ingresosRoute, auth.config),
       ]);
 
-      const listaResumen = resCargos.data.resumen || [];
+      const listaResumen = resCargos.data?.resumen || [];
       const listaRecibos = Array.isArray(resIngresos.data)
         ? resIngresos.data
-        : resIngresos.data.ingresos || [];
+        : resIngresos.data?.ingresos || [];
 
       setResumenSocios(listaResumen);
       setRecibos(listaRecibos);
     } catch (err) {
-      console.error(err);
-      toast.error("Error al cargar datos de cobranza y caja", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar datos de cobranza y caja",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -408,16 +446,18 @@ function CajaCobranzaPage() {
 
     resumenSocios.forEach((s) => {
       const g = parseFloat(s.total_deuda_general || 0);
-      totalDeudaMercado += g;
-      totalDeudaLuz += parseFloat(s.luz?.total || 0);
-      totalDeudaSerenaje += parseFloat(s.serenaje?.total || 0);
-      totalDeudaMultas += parseFloat(s.multas?.total || 0);
-      if (g > 0) sociosConDeuda++;
+      if (!isNaN(g)) {
+        totalDeudaMercado += g;
+        totalDeudaLuz += parseFloat(s.luz?.total || 0);
+        totalDeudaSerenaje += parseFloat(s.serenaje?.total || 0);
+        totalDeudaMultas += parseFloat(s.multas?.total || 0);
+        if (g > 0) sociosConDeuda++;
+      }
     });
 
     const totalRecaudadoValido = recibos
       .filter((r) => r.estado === "Valido")
-      .reduce((acc, r) => acc + parseFloat(r.monto_total_recibido || 0), 0);
+      .reduce((acc, r) => acc + (parseFloat(r.monto_total_recibido || 0) || 0), 0);
 
     return {
       totalDeudaMercado,
@@ -502,13 +542,13 @@ function CajaCobranzaPage() {
       if (itemsSeleccionados[c.id_cargo]) {
         const cap = parseFloat(c.saldo_capital_pendiente || 0);
         const mor = parseFloat(c.monto_mora_acumulada || 0);
-        totalCapital += cap;
-        totalMora += mor;
-        total += cap + mor;
+        totalCapital += isNaN(cap) ? 0 : cap;
+        totalMora += isNaN(mor) ? 0 : mor;
+        total += (isNaN(cap) ? 0 : cap) + (isNaN(mor) ? 0 : mor);
         items.push({
           id_cargo: c.id_cargo,
-          monto_abonado_capital: cap,
-          monto_abonado_mora: mor,
+          monto_abonado_capital: isNaN(cap) ? 0 : cap,
+          monto_abonado_mora: isNaN(mor) ? 0 : mor,
         });
       }
     });
@@ -545,7 +585,6 @@ function CajaCobranzaPage() {
       setReciboGenerado(data.ingreso);
       setModalReciboExito(true);
 
-      // Recargar datos actualizados
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.mensaje || "Error al procesar cobro", toastOptions);
@@ -554,7 +593,7 @@ function CajaCobranzaPage() {
     }
   };
 
-  // ─── Anulación de Recibo con Modal Moderno (sin prompt nativo) ────────────
+  // ─── Anulación de Recibo con Modal Moderno ─────────────────────────────────
   const handleAnularRecibo = (recibo) => {
     setConfirmModalData({
       isOpen: true,
@@ -576,7 +615,7 @@ function CajaCobranzaPage() {
             auth.config
           );
           toast.success("Recibo anulado con éxito y deuda revertida en el estado de cuenta", toastOptions);
-          setConfirmModalData({ isOpen: false });
+          setConfirmModalData(confirmModalInitial);
           fetchData();
         } catch (err) {
           toast.error(err.response?.data?.mensaje || "Error al anular recibo", toastOptions);
@@ -586,7 +625,9 @@ function CajaCobranzaPage() {
     });
   };
 
-  // ─── Registro de Ingreso Directo (Traspaso 10%, Afiliación, etc.) ─────────
+  // ─── Registro de Ingreso Directo ──────────────────────────────────────────
+  const [directoErrors, setDirectoErrors] = useState({});
+
   const handleAbrirModalDirecto = () => {
     setFormDirecto({
       tipo_origen: "traspaso",
@@ -599,10 +640,14 @@ function CajaCobranzaPage() {
       fecha_pago: new Date().toISOString().split("T")[0],
       detalle: "Pago del 10% reglamentario por transferencia/venta de caseta según estatutos de la asociación.",
     });
+    setDirectoErrors({});
     setModalDirectoAbierto(true);
   };
 
   const handleDirectoChange = (campo, valor) => {
+    if (directoErrors[campo]) {
+      setDirectoErrors((prev) => ({ ...prev, [campo]: "" }));
+    }
     setFormDirecto((prev) => {
       const nuevo = { ...prev, [campo]: valor };
 
@@ -657,17 +702,47 @@ function CajaCobranzaPage() {
     });
   };
 
+  const validateDirecto = () => {
+    const errs = {};
+    const montoNum = parseFloat(formDirecto.monto);
+    if (!formDirecto.monto || isNaN(montoNum) || montoNum <= 0) {
+      errs.monto = "El monto debe ser un valor positivo mayor a 0 Bs.";
+    }
+    if (!formDirecto.concepto || !formDirecto.concepto.trim()) {
+      errs.concepto = "El concepto del ingreso es obligatorio.";
+    } else if (formDirecto.concepto.trim().length < 3) {
+      errs.concepto = "El concepto debe tener al menos 3 caracteres.";
+    }
+    if (!formDirecto.pagador || !formDirecto.pagador.trim()) {
+      errs.pagador = "El nombre del pagador es obligatorio.";
+    } else if (formDirecto.pagador.trim().length < 2) {
+      errs.pagador = "El pagador debe tener al menos 2 caracteres.";
+    }
+
+    if (formDirecto.tipo_origen === "traspaso") {
+      const ventaNum = parseFloat(formDirecto.valor_venta_caseta);
+      if (!formDirecto.valor_venta_caseta || isNaN(ventaNum) || ventaNum <= 0) {
+        errs.valor_venta_caseta = "Ingrese el valor de venta pactado (> 0 Bs).";
+      }
+      const pctNum = parseFloat(formDirecto.porcentaje_traspaso);
+      if (isNaN(pctNum) || pctNum <= 0 || pctNum > 100) {
+        errs.porcentaje_traspaso = "El porcentaje debe estar entre 1 y 100%.";
+      }
+    }
+
+    setDirectoErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
   const handleSubmitDirecto = async (e) => {
     e.preventDefault();
+
+    if (!validateDirecto()) {
+      toast.warning("Por favor complete los campos obligatorios del ingreso", toastOptions);
+      return;
+    }
+
     const montoNum = parseFloat(formDirecto.monto);
-    if (isNaN(montoNum) || montoNum <= 0) {
-      toast.warning("Ingrese un monto válido mayor a 0", toastOptions);
-      return;
-    }
-    if (!formDirecto.concepto.trim()) {
-      toast.warning("El concepto del ingreso es obligatorio", toastOptions);
-      return;
-    }
 
     try {
       setGuardandoDirecto(true);
@@ -696,7 +771,6 @@ function CajaCobranzaPage() {
       setReciboGenerado(data.ingreso);
       setModalReciboExito(true);
 
-      // Recargar datos actualizados
       fetchData();
     } catch (err) {
       toast.error(err.response?.data?.mensaje || "Error al registrar ingreso directo", toastOptions);
@@ -728,10 +802,26 @@ function CajaCobranzaPage() {
                 fontSize: "0.8rem",
                 color: "#38bdf8",
                 fontWeight: 600,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.4rem",
               }}
             >
-              🛡️ Serenaje (20 Bs) generado automáticamente cada 5 de cada mes
+              <ShieldCheck size={16} /> Serenaje (20 Bs) generado automáticamente cada mes
             </div>
+            <CreateButton
+              onClick={handleAbrirModalDirecto}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.4rem",
+                background: "linear-gradient(135deg, #059669 0%, #10b981 100%)",
+                fontSize: "0.825rem",
+              }}
+            >
+              <DollarSign size={16} />
+              <span>+ Ingreso Directo (Traspaso 10%)</span>
+            </CreateButton>
           </div>
         </SectionHeader>
 
@@ -740,7 +830,7 @@ function CajaCobranzaPage() {
           <MetricCard>
             <span className="label">Total Deuda Mercado (Por Cobrar)</span>
             <h2 style={{ color: theme.colors.danger }}>
-              {metricas.totalDeudaMercado.toFixed(2)} Bs
+              {(metricas.totalDeudaMercado || 0).toFixed(2)} Bs
             </h2>
             <p className="hint">{metricas.sociosConDeuda} socio(s) con deudas pendientes</p>
           </MetricCard>
@@ -748,7 +838,7 @@ function CajaCobranzaPage() {
           <MetricCard>
             <span className="label">Deuda en Luz Eléctrica (1 kW = 2 Bs)</span>
             <h2 style={{ color: theme.colors.warning }}>
-              {metricas.totalDeudaLuz.toFixed(2)} Bs
+              {(metricas.totalDeudaLuz || 0).toFixed(2)} Bs
             </h2>
             <p className="hint">Consumos acumulados de medidores</p>
           </MetricCard>
@@ -756,7 +846,7 @@ function CajaCobranzaPage() {
           <MetricCard>
             <span className="label">Deuda en Serenaje y Seguridad</span>
             <h2 style={{ color: "#38bdf8" }}>
-              {metricas.totalDeudaSerenaje.toFixed(2)} Bs
+              {(metricas.totalDeudaSerenaje || 0).toFixed(2)} Bs
             </h2>
             <p className="hint">Cuota fija de 20 Bs por mes</p>
           </MetricCard>
@@ -764,7 +854,7 @@ function CajaCobranzaPage() {
           <MetricCard>
             <span className="label">Multas de Eventos y Marchas</span>
             <h2 style={{ color: "#f43f5e" }}>
-              {metricas.totalDeudaMultas.toFixed(2)} Bs
+              {(metricas.totalDeudaMultas || 0).toFixed(2)} Bs
             </h2>
             <p className="hint">Inasistencias aplicadas en caja</p>
           </MetricCard>
@@ -772,7 +862,7 @@ function CajaCobranzaPage() {
           <MetricCard>
             <span className="label">Total Recaudado en Caja</span>
             <h2 style={{ color: theme.colors.success }}>
-              {metricas.totalRecaudadoValido.toFixed(2)} Bs
+              {(metricas.totalRecaudadoValido || 0).toFixed(2)} Bs
             </h2>
             <p className="hint">{recibos.length} recibo(s) emitidos</p>
           </MetricCard>
@@ -784,14 +874,14 @@ function CajaCobranzaPage() {
             $active={vistaActiva === "deudas"}
             onClick={() => setVistaActiva("deudas")}
           >
-            <span>💳</span>
+            <CreditCard size={16} />
             <span>Cobranza por Socio (Luz, Serenaje, Multas)</span>
           </TabBtn>
           <TabBtn
             $active={vistaActiva === "recibos"}
             onClick={() => setVistaActiva("recibos")}
           >
-            <span>🧾</span>
+            <Receipt size={16} />
             <span>Historial de Recibos Emitidos</span>
           </TabBtn>
         </ViewToggleBar>
@@ -865,7 +955,9 @@ function CajaCobranzaPage() {
                               <div style={{ marginTop: "0.25rem" }}>
                                 <span
                                   style={{
-                                    display: "inline-block",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "3px",
                                     fontSize: "0.68rem",
                                     fontWeight: 700,
                                     backgroundColor: "rgba(14, 165, 233, 0.15)",
@@ -876,7 +968,8 @@ function CajaCobranzaPage() {
                                   }}
                                   title={`Propietario de ${s.total_casetas_dueno} casetas: ${s.todas_casetas_dueno?.join(", ")}`}
                                 >
-                                  🏷️ {s.total_casetas_dueno} Casetas ({s.todas_casetas_dueno?.join(", ")})
+                                  <Tag size={11} />
+                                  <span>{s.total_casetas_dueno} Casetas ({s.todas_casetas_dueno?.join(", ")})</span>
                                 </span>
                               </div>
                             )}
@@ -891,15 +984,16 @@ function CajaCobranzaPage() {
                             {s.luz?.total > 0 ? (
                               <div>
                                 <strong style={{ color: theme.colors.warning }}>
-                                  {s.luz.total.toFixed(2)} Bs
+                                  {(s.luz.total || 0).toFixed(2)} Bs
                                 </strong>
                                 <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
                                   {s.luz.meses_debe} mes(es) pendiente(s)
                                 </div>
                               </div>
                             ) : (
-                              <span style={{ color: theme.colors.success, fontSize: "0.85rem", fontWeight: 600 }}>
-                                ✅ Al día
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: theme.colors.success, fontSize: "0.85rem", fontWeight: 600 }}>
+                                <CheckCircle2 size={13} />
+                                <span>Al día</span>
                               </span>
                             )}
                           </TableCell>
@@ -907,15 +1001,16 @@ function CajaCobranzaPage() {
                             {s.serenaje?.total > 0 ? (
                               <div>
                                 <strong style={{ color: "#38bdf8" }}>
-                                  {s.serenaje.total.toFixed(2)} Bs
+                                  {(s.serenaje.total || 0).toFixed(2)} Bs
                                 </strong>
                                 <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
                                   {s.serenaje.meses_debe} mes(es) adeudado(s)
                                 </div>
                               </div>
                             ) : (
-                              <span style={{ color: theme.colors.success, fontSize: "0.85rem", fontWeight: 600 }}>
-                                ✅ Al día
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: theme.colors.success, fontSize: "0.85rem", fontWeight: 600 }}>
+                                <CheckCircle2 size={13} />
+                                <span>Al día</span>
                               </span>
                             )}
                           </TableCell>
@@ -923,15 +1018,16 @@ function CajaCobranzaPage() {
                             {s.multas?.total > 0 ? (
                               <div>
                                 <strong style={{ color: "#f43f5e" }}>
-                                  {s.multas.total.toFixed(2)} Bs
+                                  {(s.multas.total || 0).toFixed(2)} Bs
                                 </strong>
                                 <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
                                   {s.multas.cantidad} multa(s)
                                 </div>
                               </div>
                             ) : (
-                              <span style={{ color: theme.colors.success, fontSize: "0.85rem", fontWeight: 600 }}>
-                                ✅ Sin multas
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: theme.colors.success, fontSize: "0.85rem", fontWeight: 600 }}>
+                                <CheckCircle2 size={13} />
+                                <span>Sin multas</span>
                               </span>
                             )}
                           </TableCell>
@@ -939,22 +1035,23 @@ function CajaCobranzaPage() {
                             {s.aportes?.total > 0 ? (
                               <div>
                                 <strong style={{ color: "#a855f7" }}>
-                                  {s.aportes.total.toFixed(2)} Bs
+                                  {(s.aportes.total || 0).toFixed(2)} Bs
                                 </strong>
                                 <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
                                   {s.aportes.cantidad} cuota(s)/mora(s)
                                 </div>
                               </div>
                             ) : (
-                              <span style={{ color: theme.colors.success, fontSize: "0.85rem", fontWeight: 600 }}>
-                                ✅ Al día
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: theme.colors.success, fontSize: "0.85rem", fontWeight: 600 }}>
+                                <CheckCircle2 size={13} />
+                                <span>Al día</span>
                               </span>
                             )}
                           </TableCell>
                           <TableCell>
                             {tieneDeuda ? (
                               <span style={{ color: theme.colors.danger, fontWeight: 800, fontSize: "1.05rem" }}>
-                                {s.total_deuda_general.toFixed(2)} Bs
+                                {(s.total_deuda_general || 0).toFixed(2)} Bs
                               </span>
                             ) : (
                               <span style={{ color: theme.colors.success, fontWeight: 700, fontSize: "0.95rem" }}>
@@ -1039,29 +1136,33 @@ function CajaCobranzaPage() {
                             <strong>#{String(item.nro_recibo || item.id_ingreso).padStart(5, "0")}</strong>
                             {item.tipo_origen === "traspaso" && (
                               <div style={{ marginTop: "0.2rem" }}>
-                                <span style={{ fontSize: "0.68rem", backgroundColor: "rgba(245, 158, 11, 0.15)", color: "#f59e0b", border: "1px solid rgba(245, 158, 11, 0.3)", padding: "1px 5px", borderRadius: "4px", fontWeight: 700 }}>
-                                  🏷️ Traspaso 10%
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.68rem", backgroundColor: "rgba(245, 158, 11, 0.15)", color: "#f59e0b", border: "1px solid rgba(245, 158, 11, 0.3)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                  <Tag size={11} />
+                                  <span>Traspaso 10%</span>
                                 </span>
                               </div>
                             )}
                             {item.tipo_origen === "afiliacion" && (
                               <div style={{ marginTop: "0.2rem" }}>
-                                <span style={{ fontSize: "0.68rem", backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.3)", padding: "1px 5px", borderRadius: "4px", fontWeight: 700 }}>
-                                  🤝 Afiliación
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.68rem", backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.3)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                  <UserCheck size={11} />
+                                  <span>Afiliación</span>
                                 </span>
                               </div>
                             )}
                             {item.tipo_origen === "alquiler" && (
                               <div style={{ marginTop: "0.2rem" }}>
-                                <span style={{ fontSize: "0.68rem", backgroundColor: "rgba(14, 165, 233, 0.15)", color: "#0ea5e9", border: "1px solid rgba(14, 165, 233, 0.3)", padding: "1px 5px", borderRadius: "4px", fontWeight: 700 }}>
-                                  🏢 Alquiler
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.68rem", backgroundColor: "rgba(14, 165, 233, 0.15)", color: "#0ea5e9", border: "1px solid rgba(14, 165, 233, 0.3)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                  <Building size={11} />
+                                  <span>Alquiler</span>
                                 </span>
                               </div>
                             )}
                             {item.tipo_origen === "directo" && (
                               <div style={{ marginTop: "0.2rem" }}>
-                                <span style={{ fontSize: "0.68rem", backgroundColor: "rgba(168, 85, 247, 0.15)", color: "#a855f7", border: "1px solid rgba(168, 85, 247, 0.3)", padding: "1px 5px", borderRadius: "4px", fontWeight: 700 }}>
-                                  ⚡ Ingreso Directo
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.68rem", backgroundColor: "rgba(168, 85, 247, 0.15)", color: "#a855f7", border: "1px solid rgba(168, 85, 247, 0.3)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                  <Zap size={11} />
+                                  <span>Ingreso Directo</span>
                                 </span>
                               </div>
                             )}
@@ -1071,22 +1172,24 @@ function CajaCobranzaPage() {
                             {socio.nro_caseta ? (
                               <strong>Caseta #{socio.nro_caseta}</strong>
                             ) : (
-                              <span style={{ color: "#38bdf8", fontWeight: 700, fontSize: "0.82rem" }}>
-                                🌐 Ingreso Directo / Externo
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#38bdf8", fontWeight: 700, fontSize: "0.82rem" }}>
+                                <Globe size={13} />
+                                <span>Ingreso Directo / Externo</span>
                               </span>
                             )}
                             <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
                               {item.pagador || (persona.nombres ? `${persona.nombres} ${persona.apellidos || ""}`.trim() : "Público General")}
                             </div>
                             {item.concepto && (
-                              <div style={{ fontSize: "0.72rem", color: theme.colors.primary, marginTop: "0.15rem" }}>
-                                📋 {item.concepto}
+                              <div style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.72rem", color: theme.colors.primary, marginTop: "0.15rem" }}>
+                                <FileText size={11} />
+                                <span>{item.concepto}</span>
                               </div>
                             )}
                           </TableCell>
                           <TableCell>{cajeroNombre}</TableCell>
                           <TableCell style={{ fontWeight: 800, color: theme.colors.success }}>
-                            {parseFloat(item.monto_total_recibido).toFixed(2)} Bs
+                            {parseFloat(item.monto_total_recibido || 0).toFixed(2)} Bs
                           </TableCell>
                           <TableCell>
                             <StatusBadge $status={item.estado}>{item.estado}</StatusBadge>
@@ -1099,8 +1202,9 @@ function CajaCobranzaPage() {
                                 style={{ textDecoration: "none" }}
                               >
                                 {({ loading: pdfLoading }) => (
-                                  <ViewButton as="span">
-                                    {pdfLoading ? "Generando..." : "🖨️ PDF"}
+                                  <ViewButton as="span" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                    <Printer size={13} />
+                                    <span>{pdfLoading ? "Generando..." : "PDF"}</span>
                                   </ViewButton>
                                 )}
                               </PDFDownloadLink>
@@ -1149,6 +1253,9 @@ function CajaCobranzaPage() {
                     cursor: "pointer",
                     fontSize: "0.78rem",
                     fontWeight: 700,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "3px",
                   }}
                   onClick={() => {
                     const todos = {};
@@ -1156,7 +1263,8 @@ function CajaCobranzaPage() {
                     setItemsSeleccionados(todos);
                   }}
                 >
-                  ✓ Seleccionar Todos
+                  <Check size={13} />
+                  <span>Seleccionar Todos</span>
                 </button>
                 <button
                   type="button"
@@ -1166,10 +1274,14 @@ function CajaCobranzaPage() {
                     color: theme.colors.textMuted,
                     cursor: "pointer",
                     fontSize: "0.78rem",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "3px",
                   }}
                   onClick={() => setItemsSeleccionados({})}
                 >
-                  ✕ Deseleccionar
+                  <X size={13} />
+                  <span>Deseleccionar</span>
                 </button>
               </div>
             </div>
@@ -1184,8 +1296,11 @@ function CajaCobranzaPage() {
                   border: `1px solid ${theme.colors.success}`,
                 }}
               >
+                <div style={{ marginBottom: "0.5rem", display: "flex", justifyContent: "center" }}>
+                  <CheckCircle2 size={36} color={theme.colors.success} />
+                </div>
                 <h3 style={{ color: theme.colors.success, marginBottom: "0.3rem" }}>
-                  🎉 Este socio se encuentra totalmente al día
+                  Este socio se encuentra totalmente al día
                 </h3>
                 <p style={{ fontSize: "0.85rem", color: theme.colors.textMuted }}>
                   No tiene deudas pendientes en Luz, Serenaje ni Multas.
@@ -1197,8 +1312,11 @@ function CajaCobranzaPage() {
                 {socioCobro.luz?.cargos?.length > 0 && (
                   <CategoryGroupCard>
                     <div className="cat-header">
-                      <strong>💡 Consumo de Luz Eléctrica ({socioCobro.luz.cargos.length} mes/es)</strong>
-                      <span className="subtotal">{socioCobro.luz.total.toFixed(2)} Bs</span>
+                      <strong style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <Zap size={14} color={theme.colors.warning} />
+                        <span>Consumo de Luz Eléctrica ({socioCobro.luz.cargos.length} mes/es)</span>
+                      </strong>
+                      <span className="subtotal">{(socioCobro.luz.total || 0).toFixed(2)} Bs</span>
                     </div>
                     {socioCobro.luz.cargos.map((c) => {
                       const totalItem =
@@ -1227,10 +1345,10 @@ function CajaCobranzaPage() {
                             </div>
                           </div>
                           <div className="right">
-                            <div className="amount">{totalItem.toFixed(2)} Bs</div>
+                            <div className="amount">{(isNaN(totalItem) ? 0 : totalItem).toFixed(2)} Bs</div>
                             {parseFloat(c.monto_mora_acumulada || 0) > 0 && (
                               <div className="mora">
-                                Mora: +{parseFloat(c.monto_mora_acumulada).toFixed(2)} Bs
+                                Mora: +{parseFloat(c.monto_mora_acumulada || 0).toFixed(2)} Bs
                               </div>
                             )}
                           </div>
@@ -1244,9 +1362,12 @@ function CajaCobranzaPage() {
                 {socioCobro.serenaje?.cargos?.length > 0 && (
                   <CategoryGroupCard>
                     <div className="cat-header">
-                      <strong>🛡️ Serenaje y Seguridad ({socioCobro.serenaje.cargos.length} mes/es)</strong>
+                      <strong style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <ShieldCheck size={14} color="#38bdf8" />
+                        <span>Serenaje y Seguridad ({socioCobro.serenaje.cargos.length} mes/es)</span>
+                      </strong>
                       <span className="subtotal" style={{ color: "#38bdf8" }}>
-                        {socioCobro.serenaje.total.toFixed(2)} Bs
+                        {(socioCobro.serenaje.total || 0).toFixed(2)} Bs
                       </span>
                     </div>
                     {socioCobro.serenaje.cargos.map((c) => {
@@ -1276,10 +1397,10 @@ function CajaCobranzaPage() {
                             </div>
                           </div>
                           <div className="right">
-                            <div className="amount">{totalItem.toFixed(2)} Bs</div>
+                            <div className="amount">{(isNaN(totalItem) ? 0 : totalItem).toFixed(2)} Bs</div>
                             {parseFloat(c.monto_mora_acumulada || 0) > 0 && (
                               <div className="mora">
-                                Mora: +{parseFloat(c.monto_mora_acumulada).toFixed(2)} Bs
+                                Mora: +{parseFloat(c.monto_mora_acumulada || 0).toFixed(2)} Bs
                               </div>
                             )}
                           </div>
@@ -1293,9 +1414,12 @@ function CajaCobranzaPage() {
                 {socioCobro.multas?.cargos?.length > 0 && (
                   <CategoryGroupCard>
                     <div className="cat-header">
-                      <strong>⚠️ Multas y Sanciones ({socioCobro.multas.cargos.length} falta/s)</strong>
+                      <strong style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <AlertTriangle size={14} color="#f43f5e" />
+                        <span>Multas y Sanciones ({socioCobro.multas.cargos.length} falta/s)</span>
+                      </strong>
                       <span className="subtotal" style={{ color: "#f43f5e" }}>
-                        {socioCobro.multas.total.toFixed(2)} Bs
+                        {(socioCobro.multas.total || 0).toFixed(2)} Bs
                       </span>
                     </div>
                     {socioCobro.multas.cargos.map((c) => {
@@ -1323,10 +1447,10 @@ function CajaCobranzaPage() {
                             </div>
                           </div>
                           <div className="right">
-                            <div className="amount">{totalItem.toFixed(2)} Bs</div>
+                            <div className="amount">{(isNaN(totalItem) ? 0 : totalItem).toFixed(2)} Bs</div>
                             {parseFloat(c.monto_mora_acumulada || 0) > 0 && (
                               <div className="mora">
-                                Mora: +{parseFloat(c.monto_mora_acumulada).toFixed(2)} Bs
+                                Mora: +{parseFloat(c.monto_mora_acumulada || 0).toFixed(2)} Bs
                               </div>
                             )}
                           </div>
@@ -1340,9 +1464,12 @@ function CajaCobranzaPage() {
                 {socioCobro.aportes?.cargos?.length > 0 && (
                   <CategoryGroupCard>
                     <div className="cat-header">
-                      <strong>🏗️ Aportes Pro-Mejoras ({socioCobro.aportes.cargos.length} concepto/s)</strong>
+                      <strong style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <Hammer size={14} color="#a855f7" />
+                        <span>Aportes Pro-Mejoras ({socioCobro.aportes.cargos.length} concepto/s)</span>
+                      </strong>
                       <span className="subtotal" style={{ color: "#a855f7" }}>
-                        {socioCobro.aportes.total.toFixed(2)} Bs
+                        {(socioCobro.aportes.total || 0).toFixed(2)} Bs
                       </span>
                     </div>
                     {socioCobro.aportes.cargos.map((c) => {
@@ -1370,10 +1497,10 @@ function CajaCobranzaPage() {
                             </div>
                           </div>
                           <div className="right">
-                            <div className="amount">{totalItem.toFixed(2)} Bs</div>
+                            <div className="amount">{(isNaN(totalItem) ? 0 : totalItem).toFixed(2)} Bs</div>
                             {parseFloat(c.monto_mora_acumulada || 0) > 0 && (
                               <div className="mora">
-                                Mora: +{parseFloat(c.monto_mora_acumulada).toFixed(2)} Bs
+                                Mora: +{parseFloat(c.monto_mora_acumulada || 0).toFixed(2)} Bs
                               </div>
                             )}
                           </div>
@@ -1387,8 +1514,11 @@ function CajaCobranzaPage() {
                 {socioCobro.otros?.cargos?.length > 0 && (
                   <CategoryGroupCard>
                     <div className="cat-header">
-                      <strong>📌 Otras Cuotas y Aportes ({socioCobro.otros.cargos.length})</strong>
-                      <span className="subtotal">{socioCobro.otros.total.toFixed(2)} Bs</span>
+                      <strong style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                        <Pin size={14} />
+                        <span>Otras Cuotas y Aportes ({socioCobro.otros.cargos.length})</span>
+                      </strong>
+                      <span className="subtotal">{(socioCobro.otros.total || 0).toFixed(2)} Bs</span>
                     </div>
                     {socioCobro.otros.cargos.map((c) => {
                       const totalItem =
@@ -1415,7 +1545,7 @@ function CajaCobranzaPage() {
                             </div>
                           </div>
                           <div className="right">
-                            <div className="amount">{totalItem.toFixed(2)} Bs</div>
+                            <div className="amount">{(isNaN(totalItem) ? 0 : totalItem).toFixed(2)} Bs</div>
                           </div>
                         </DebtItemRow>
                       );
@@ -1433,7 +1563,7 @@ function CajaCobranzaPage() {
                     <span>Conceptos a Liquidar</span>
                     <strong>{cobroDetalle.items.length} ítem(s) seleccionado(s)</strong>
                     <div style={{ fontSize: "0.78rem", color: theme.colors.textMuted, marginTop: "0.2rem" }}>
-                      Capital: {cobroDetalle.totalCapital} Bs | Mora: {cobroDetalle.totalMora} Bs
+                      Capital: {cobroDetalle.totalCapital.toFixed(2)} Bs | Mora: {cobroDetalle.totalMora.toFixed(2)} Bs
                     </div>
                   </div>
                   <div className="total-badge">
@@ -1481,14 +1611,16 @@ function CajaCobranzaPage() {
       >
         {reciboGenerado && (
           <div style={{ textAlign: "center", padding: "1rem 0" }}>
-            <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>🎉</div>
+            <div style={{ marginBottom: "0.75rem", display: "flex", justifyContent: "center" }}>
+              <CheckCircle size={48} color={theme.colors.success} />
+            </div>
             <h3 style={{ fontSize: "1.3rem", color: theme.colors.textMain }}>
               Recibo Oficial #{String(reciboGenerado.id_ingreso).padStart(5, "0")}
             </h3>
             <p style={{ color: theme.colors.textMuted, fontSize: "0.9rem", margin: "0.5rem 0 1.25rem" }}>
               Total Cobrado:{" "}
               <strong style={{ color: theme.colors.success, fontSize: "1.2rem" }}>
-                {parseFloat(reciboGenerado.monto_total_recibido).toFixed(2)} Bs
+                {parseFloat(reciboGenerado.monto_total_recibido || 0).toFixed(2)} Bs
               </strong>
             </p>
 
@@ -1499,8 +1631,9 @@ function CajaCobranzaPage() {
                 style={{ textDecoration: "none" }}
               >
                 {({ loading: pdfLoading }) => (
-                  <CreateButton as="span" style={{ cursor: "pointer", display: "inline-block" }}>
-                    {pdfLoading ? "Generando PDF..." : "🖨️ Descargar Recibo Oficial en PDF"}
+                  <CreateButton as="span" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                    <Printer size={16} />
+                    <span>{pdfLoading ? "Generando PDF..." : "Descargar Recibo Oficial en PDF"}</span>
                   </CreateButton>
                 )}
               </PDFDownloadLink>
@@ -1512,24 +1645,24 @@ function CajaCobranzaPage() {
         )}
       </Modal>
 
-      {/* ─── MODAL 3: REGISTRO DE INGRESO DIRECTO (TRASPASO 10%, AFILIACIÓN, ETC.) ─── */}
+      {/* ─── MODAL 3: REGISTRO DE INGRESO DIRECTO ─── */}
       <Modal
         isOpen={modalDirectoAbierto}
         onClose={() => setModalDirectoAbierto(false)}
         title="Registrar Ingreso Directo en Caja (Traspaso 10% / Afiliación / Extraordinario)"
         maxWidth="640px"
       >
-        <form onSubmit={handleSubmitDirecto}>
+        <form onSubmit={handleSubmitDirecto} noValidate>
           <FormGroup>
             <Label>Tipo de Ingreso Directo</Label>
             <Select
               value={formDirecto.tipo_origen}
               onChange={(e) => handleDirectoChange("tipo_origen", e.target.value)}
             >
-              <option value="traspaso">🏷️ Traspaso de Caseta (Cobro del 10% del valor de venta)</option>
-              <option value="afiliacion">🤝 Cuota de Afiliación / Nuevo Socio</option>
-              <option value="alquiler">🏢 Alquiler de Espacio Común / Depósito / Baños</option>
-              <option value="directo">⚡ Otro Ingreso Directo / Extraordinario</option>
+              <option value="traspaso">Traspaso de Caseta (Cobro del 10% del valor de venta)</option>
+              <option value="afiliacion">Cuota de Afiliación / Nuevo Socio</option>
+              <option value="alquiler">Alquiler de Espacio Común / Depósito / Baños</option>
+              <option value="directo">Otro Ingreso Directo / Extraordinario</option>
             </Select>
           </FormGroup>
 
@@ -1537,34 +1670,38 @@ function CajaCobranzaPage() {
           {formDirecto.tipo_origen === "traspaso" && (
             <CalculatorBox>
               <div className="calc-title">
-                <span>🧮</span>
+                <Calculator size={16} />
                 <span>Calculadora de Traspaso de Caseta (10% de Ley)</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                 <div>
-                  <Label style={{ color: "#d97706" }}>Valor Venta Caseta (Bs.)</Label>
+                  <Label style={{ color: "#d97706" }}>Valor Venta Caseta (Bs.) *</Label>
                   <Input
                     type="number"
                     step="0.01"
                     min="0"
                     placeholder="Ej. 50000"
                     value={formDirecto.valor_venta_caseta}
+                    $hasError={Boolean(directoErrors.valor_venta_caseta)}
                     onChange={(e) => handleDirectoChange("valor_venta_caseta", e.target.value)}
-                    style={{ borderColor: "#f59e0b" }}
+                    style={{ borderColor: directoErrors.valor_venta_caseta ? theme.colors.danger : "#f59e0b" }}
                     autoFocus
                   />
+                  {directoErrors.valor_venta_caseta && <ErrorText>{directoErrors.valor_venta_caseta}</ErrorText>}
                 </div>
                 <div>
-                  <Label style={{ color: "#d97706" }}>% Retención / Traspaso</Label>
+                  <Label style={{ color: "#d97706" }}>% Retención / Traspaso *</Label>
                   <Input
                     type="number"
                     step="0.1"
                     min="1"
                     max="100"
                     value={formDirecto.porcentaje_traspaso}
+                    $hasError={Boolean(directoErrors.porcentaje_traspaso)}
                     onChange={(e) => handleDirectoChange("porcentaje_traspaso", e.target.value)}
-                    style={{ borderColor: "#f59e0b" }}
+                    style={{ borderColor: directoErrors.porcentaje_traspaso ? theme.colors.danger : "#f59e0b" }}
                   />
+                  {directoErrors.porcentaje_traspaso && <ErrorText>{directoErrors.porcentaje_traspaso}</ErrorText>}
                 </div>
               </div>
               <div className="calc-result">
@@ -1581,11 +1718,12 @@ function CajaCobranzaPage() {
               <Label>Nombre del Concepto / Glosa Oficial *</Label>
               <Input
                 type="text"
-                required
                 value={formDirecto.concepto}
+                $hasError={Boolean(directoErrors.concepto)}
                 onChange={(e) => handleDirectoChange("concepto", e.target.value)}
                 placeholder="Ej. Traspaso de Caseta (10%), Cuota de Afiliación..."
               />
+              {directoErrors.concepto && <ErrorText>{directoErrors.concepto}</ErrorText>}
             </FormGroup>
 
             <FormGroup>
@@ -1594,12 +1732,13 @@ function CajaCobranzaPage() {
                 type="number"
                 step="0.01"
                 min="0.01"
-                required
                 value={formDirecto.monto}
+                $hasError={Boolean(directoErrors.monto)}
                 onChange={(e) => handleDirectoChange("monto", e.target.value)}
                 placeholder="0.00"
                 style={{ fontWeight: 800, fontSize: "1rem", color: theme.colors.success }}
               />
+              {directoErrors.monto && <ErrorText>{directoErrors.monto}</ErrorText>}
             </FormGroup>
           </div>
 
@@ -1626,11 +1765,12 @@ function CajaCobranzaPage() {
               <Label>Nombre del Pagador / Adquiriente *</Label>
               <Input
                 type="text"
-                required
                 value={formDirecto.pagador}
+                $hasError={Boolean(directoErrors.pagador)}
                 onChange={(e) => handleDirectoChange("pagador", e.target.value)}
                 placeholder="Ej. Juan Pérez (Comprador caseta #14)"
               />
+              {directoErrors.pagador && <ErrorText>{directoErrors.pagador}</ErrorText>}
             </FormGroup>
           </div>
 
@@ -1666,7 +1806,7 @@ function CajaCobranzaPage() {
               disabled={guardandoDirecto || !formDirecto.monto || parseFloat(formDirecto.monto) <= 0}
               style={{ background: "linear-gradient(135deg, #059669 0%, #10b981 100%)" }}
             >
-              {guardandoDirecto ? "Registrando..." : `💰 Registrar Ingreso (${parseFloat(formDirecto.monto || 0).toFixed(2)} Bs)`}
+              {guardandoDirecto ? "Registrando..." : `Registrar Ingreso (${parseFloat(formDirecto.monto || 0).toFixed(2)} Bs)`}
             </CreateButton>
           </div>
         </form>
@@ -1682,9 +1822,9 @@ function CajaCobranzaPage() {
         requireReason={confirmModalData.requireReason}
         reasonPlaceholder={confirmModalData.reasonPlaceholder}
         onConfirm={confirmModalData.onConfirm}
-        onClose={() => setConfirmModalData({ isOpen: false })}
+        onClose={() => setConfirmModalData(confirmModalInitial)}
         loading={confirmModalData.loading}
-        danger={true}
+        isDanger={true}
       />
     </PageContainer>
   );

@@ -51,6 +51,7 @@ app.use(
 // 2. Configuración estricta de CORS según FRONTEND_URL
 const allowedOrigins = [
   process.env.FRONTEND_URL,
+  process.env.CORS_ORIGIN,
   'http://localhost:5173',
   'http://127.0.0.1:5173',
 ].filter(Boolean);
@@ -146,25 +147,52 @@ app.use((req, res) => {
 // 4. Middleware Global Centralizado de Manejo de Errores (Anti-Fugas de SQL)
 app.use(errorHandler);
 
-const { iniciarCronJobs } = require('./services/cronService');
+const { iniciarCronJobs, detenerCronJobs } = require('./services/cronService');
 
 const PORT = process.env.PORT || 3031;
+let server = null;
 
-sequelize
-  .authenticate()
-  .then(() => {
-    console.log('Conexión a la base de datos MySQL establecida correctamente.');
-    iniciarCronJobs();
-    app.listen(PORT, () => {
-      console.log(`Servidor MiSocios escuchando en el puerto ${PORT}`);
-      console.log(`URL base: http://localhost:${PORT}/api`);
+if (require.main === module) {
+  sequelize
+    .authenticate()
+    .then(() => {
+      console.log('Conexión a la base de datos MySQL establecida correctamente.');
+      iniciarCronJobs();
+      server = app.listen(PORT, () => {
+        console.log(`Servidor MiSocios escuchando en el puerto ${PORT}`);
+        console.log(`URL base: http://localhost:${PORT}/api`);
+      });
+    })
+    .catch((err) => {
+      console.error('No se pudo conectar a la base de datos MySQL:', err);
+      server = app.listen(PORT, () => {
+        console.log(`Servidor MiSocios iniciado en puerto ${PORT} (sin conexión activa a BD)`);
+      });
     });
-  })
-  .catch((err) => {
-    console.error('No se pudo conectar a la base de datos MySQL:', err);
-    app.listen(PORT, () => {
-      console.log(`Servidor MiSocios iniciado en puerto ${PORT} (sin conexión activa a BD)`);
-    });
-  });
+
+  // Cierre ordenado de servidor (Graceful Shutdown para contenedores y PM2)
+  const shutdown = async (signal) => {
+    console.log(`\nRecibida señal ${signal}. Iniciando apagado ordenado del servidor...`);
+    detenerCronJobs();
+    if (server) {
+      server.close(async () => {
+        console.log('Servidor HTTP cerrado.');
+        try {
+          await sequelize.close();
+          console.log('Conexiones a MySQL cerradas.');
+          process.exit(0);
+        } catch (dbErr) {
+          console.error('Error al cerrar base de datos:', dbErr);
+          process.exit(1);
+        }
+      });
+    } else {
+      process.exit(0);
+    }
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
 
 module.exports = app;

@@ -13,10 +13,8 @@ const HomePage = lazy(() => import("./pages/HomePage"));
 const SociosPage = lazy(() => import("./pages/SociosPage"));
 const EstadoCuentaSocioPage = lazy(() => import("./pages/EstadoCuentaSocioPage"));
 const ConsumoLuzPage = lazy(() => import("./pages/ConsumoLuzPage"));
-const SerenajePage = lazy(() => import("./pages/SerenajePage"));
 const EventosPage = lazy(() => import("./pages/EventosPage"));
 const AsistenciaPage = lazy(() => import("./pages/AsistenciaPage"));
-const CargosPage = lazy(() => import("./pages/CargosPage"));
 const AportesPage = lazy(() => import("./pages/AportesPage"));
 const CajaCobranzaPage = lazy(() => import("./pages/CajaCobranzaPage"));
 const IngresosPage = lazy(() => import("./pages/IngresosPage"));
@@ -123,7 +121,7 @@ function App() {
           <Route
             path="/consumo-luz"
             element={
-              <ProtectedRoute allowedRoles={[ROLES.SEC_HACIENDA, ROLES.PRESIDENTE]}>
+              <ProtectedRoute allowedRoles={[ROLES.SEC_HACIENDA, ROLES.PRESIDENTE, ROLES.LECTURADOR]}>
                 <ConsumoLuzPage />
               </ProtectedRoute>
             }

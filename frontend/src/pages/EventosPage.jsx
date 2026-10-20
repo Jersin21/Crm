@@ -4,6 +4,9 @@ import axios from "axios";
 import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/Sidebar";
+import Modal from "../components/Modal";
+import ConfirmModal from "../components/ConfirmModal";
+import { ClipboardList, Trash2 } from "lucide-react";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
 import theme from "../styles/theme";
@@ -11,7 +14,6 @@ import {
   PageContainer,
   ContentContainer,
   SectionHeader,
-  Card,
   TableCard,
   TableToolbar,
   TableResponsiveWrapper,
@@ -28,47 +30,6 @@ import {
 } from "../styles/commonStyles";
 import { eventosRoute } from "../utils/APIroutes";
 import { formatDate } from "../utils/dateUtils";
-
-const ModalOverlay = styled.div`
-  position: fixed;
-  inset: 0;
-  background-color: rgba(5, 10, 23, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  padding: 1rem;
-`;
-
-const ModalCard = styled(Card)`
-  width: 100%;
-  max-width: 540px;
-  max-height: 90vh;
-  overflow-y: auto;
-`;
-
-const ModalHeader = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.5rem;
-
-  h2 {
-    font-size: 1.25rem;
-    font-weight: 700;
-    color: ${theme.colors.textMain};
-  }
-
-  button {
-    background: none;
-    border: none;
-    color: ${theme.colors.textMuted};
-    font-size: 1.5rem;
-    cursor: pointer;
-    line-height: 1;
-    &:hover { color: ${theme.colors.textMain}; }
-  }
-`;
 
 const FormGroup = styled.div`
   display: flex;
@@ -88,7 +49,7 @@ const Label = styled.label`
 const Input = styled.input`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -97,9 +58,16 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    box-shadow: 0 0 0 3px ${({ $hasError }) => ($hasError ? "rgba(239, 68, 68, 0.2)" : "rgba(14, 165, 233, 0.15)")};
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
 `;
 
 const Select = styled.select`
@@ -113,7 +81,9 @@ const Select = styled.select`
   box-sizing: border-box;
   cursor: pointer;
 
-  option { background-color: ${theme.colors.bgCard}; }
+  option {
+    background-color: ${theme.colors.bgCard};
+  }
 `;
 
 const Textarea = styled.textarea`
@@ -174,6 +144,27 @@ function EventosPage() {
   const [modalAbierto, setModalAbierto] = useState(false);
   const [formData, setFormData] = useState(estadoInicial);
   const [guardando, setGuardando] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  // Modal de confirmación para eliminar evento
+  const [eventoAEliminar, setEventoAEliminar] = useState(null);
+  const [eliminando, setEliminando] = useState(false);
+
+  const validateForm = () => {
+    const errs = {};
+    if (!formData.nombre_evento || formData.nombre_evento.trim().length < 3) {
+      errs.nombre_evento = "El nombre del evento es obligatorio (mínimo 3 caracteres)";
+    }
+    if (!formData.fecha) {
+      errs.fecha = "La fecha del evento es obligatoria";
+    }
+    const multaNum = parseFloat(formData.monto_multa);
+    if (formData.monto_multa === "" || isNaN(multaNum) || multaNum < 0) {
+      errs.monto_multa = "La multa debe ser mayor o igual a 0";
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
 
   const fetchEventos = async () => {
     try {
@@ -181,7 +172,10 @@ function EventosPage() {
       const { data } = await axios.get(eventosRoute, auth.config);
       setEventos(Array.isArray(data) ? data : data.eventos || []);
     } catch (err) {
-      toast.error("Error al cargar los eventos", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar la lista de eventos",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -204,46 +198,62 @@ function EventosPage() {
     });
   };
 
-  const eventosFiltrados = eventos.filter((e) =>
-    (e.nombre_evento || "").toLowerCase().includes(busqueda.toLowerCase()) ||
-    (e.tipo_evento || "").toLowerCase().includes(busqueda.toLowerCase())
-  );
+  const eventosFiltrados = eventos.filter((e) => {
+    const q = busqueda.trim().toLowerCase();
+    const nombre = (e.nombre_evento || "").toLowerCase();
+    const tipo = (e.tipo_evento || "").toLowerCase();
+    return nombre.includes(q) || tipo.includes(q);
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.nombre_evento.trim() || !formData.fecha) {
-      toast.error("Por favor completa los campos requeridos", toastOptions);
+    if (!validateForm()) {
+      toast.error("Por favor completa los campos requeridos correctamente", toastOptions);
       return;
     }
+
+    const multaNum = parseFloat(formData.monto_multa);
+
     try {
       setGuardando(true);
       const payload = {
         ...formData,
-        monto_multa: formData.monto_multa ? parseFloat(formData.monto_multa) : 0,
+        nombre_evento: formData.nombre_evento.trim(),
+        monto_multa: multaNum,
         monto_aporte: null,
       };
       await axios.post(eventosRoute, payload, auth.config);
       toast.success("Evento creado y lista de asistencia pre-registrada", toastOptions);
       setModalAbierto(false);
       setFormData(estadoInicial);
+      setErrors({});
       fetchEventos();
     } catch (err) {
-      toast.error(err.response?.data?.mensaje || "Error al crear evento", toastOptions);
+      toast.error(err.response?.data?.mensaje || "Error al crear el evento", toastOptions);
     } finally {
       setGuardando(false);
     }
   };
 
-  const handleEliminar = async (evento) => {
-    if (!window.confirm(`¿Eliminar evento "${evento.nombre_evento}"?`)) return;
+  const confirmarEliminacion = async () => {
+    if (!eventoAEliminar) return;
     try {
-      await axios.delete(`${eventosRoute}/${evento.id_evento}`, auth.config);
-      toast.success("Evento eliminado", toastOptions);
+      setEliminando(true);
+      await axios.delete(`${eventosRoute}/${eventoAEliminar.id_evento}`, auth.config);
+      toast.success("Evento y sus listas de asistencia eliminados", toastOptions);
+      setEventoAEliminar(null);
       fetchEventos();
     } catch (err) {
-      toast.error("Error al eliminar evento", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al eliminar el evento",
+        toastOptions
+      );
+    } finally {
+      setEliminando(false);
     }
   };
+
+  const hoyStr = new Date().toISOString().split("T")[0];
 
   return (
     <PageContainer>
@@ -252,7 +262,7 @@ function EventosPage() {
         <SectionHeader>
           <div className="titles">
             <h1>Eventos, Asambleas y Marchas</h1>
-            <p>Control de asistencia y sanciones por inasistencia en asambleas, marchas y reuniones</p>
+            <p>Control de asistencia y sanciones automáticas por inasistencia en asambleas, marchas y reuniones</p>
           </div>
           <div className="actions">
             <CreateButton onClick={() => setModalAbierto(true)}>+ Nuevo Evento</CreateButton>
@@ -297,16 +307,15 @@ function EventosPage() {
                   </TableRow>
                 ) : (
                   eventosFiltrados.map((ev) => {
-                    const fechaEv = new Date(ev.fecha);
-                    const hoy = new Date();
-                    hoy.setHours(0, 0, 0, 0);
-                    const concluyo = fechaEv < hoy;
+                    const fechaEvStr = ev.fecha ? String(ev.fecha).slice(0, 10) : "";
+                    const concluyo = Boolean(fechaEvStr && fechaEvStr < hoyStr);
+
                     return (
                       <TableRow key={ev.id_evento}>
                         <TableCell>
                           <strong>{ev.nombre_evento}</strong>
                           {ev.descripcion && (
-                            <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
+                            <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted, marginTop: "0.2rem" }}>
                               {ev.descripcion}
                             </div>
                           )}
@@ -318,7 +327,9 @@ function EventosPage() {
                         </TableCell>
                         <TableCell>{formatDate(ev.fecha)}</TableCell>
                         <TableCell style={{ fontWeight: 700, color: theme.colors.danger }}>
-                          {ev.monto_multa ? `${parseFloat(ev.monto_multa).toFixed(2)} Bs` : "0.00 Bs"}
+                          {ev.monto_multa != null
+                            ? `${parseFloat(ev.monto_multa || 0).toFixed(2)} Bs`
+                            : "0.00 Bs"}
                         </TableCell>
                         <TableCell>
                           <StatusBadge $status={concluyo ? "Inactivo" : "Activo"}>
@@ -327,10 +338,12 @@ function EventosPage() {
                         </TableCell>
                         <TableCell>
                           <div style={{ display: "flex", gap: "0.5rem" }}>
-                            <ViewButton onClick={() => navigate(`/eventos/${ev.id_evento}/asistencia`)}>
-                              📝 Tomar Lista
+                            <ViewButton onClick={() => navigate(`/eventos/${ev.id_evento}/asistencia`)} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <ClipboardList size={13} /> Tomar Lista
                             </ViewButton>
-                            <DeleteButton onClick={() => handleEliminar(ev)}>🗑️ Eliminar</DeleteButton>
+                            <DeleteButton onClick={() => setEventoAEliminar(ev)} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              <Trash2 size={13} /> Eliminar
+                            </DeleteButton>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -343,77 +356,104 @@ function EventosPage() {
         </TableCard>
       </ContentContainer>
 
-      {modalAbierto && (
-        <ModalOverlay onClick={(e) => e.target === e.currentTarget && setModalAbierto(false)}>
-          <ModalCard>
-            <ModalHeader>
-              <h2>Nuevo Evento / Asamblea</h2>
-              <button onClick={() => setModalAbierto(false)}>×</button>
-            </ModalHeader>
-            <form onSubmit={handleSubmit}>
-              <FormGroup>
-                <Label>Nombre del Evento *</Label>
-                <Input
-                  name="nombre_evento"
-                  placeholder="Ej. Asamblea General Ordinaria / Marcha Central / Reunión de Sector"
-                  value={formData.nombre_evento}
-                  onChange={(e) => setFormData({ ...formData, nombre_evento: e.target.value })}
-                  required
-                />
-              </FormGroup>
-              <FormGroup>
-                <Label>Tipo de Evento *</Label>
-                <Select
-                  value={formData.tipo_evento}
-                  onChange={(e) => handleTipoEventoChange(e.target.value)}
-                >
-                  <option value="Asamblea">Asamblea General (Multa sugerida 30 Bs)</option>
-                  <option value="Marcha">Marcha / Movilización (Multa sugerida 50 Bs)</option>
-                  <option value="Reunion">Reunión de Sector (Multa sugerida 20 Bs)</option>
-                </Select>
-              </FormGroup>
-              <FormGroup>
-                <Label>Fecha del Evento *</Label>
-                <Input
-                  type="date"
-                  value={formData.fecha}
-                  onChange={(e) => setFormData({ ...formData, fecha: e.target.value })}
-                  required
-                />
-              </FormGroup>
-              <FormGroup>
-                <Label>Multa por Inasistencia / Falta (Bs) *</Label>
-                <Input
-                  type="number"
-                  step="0.50"
-                  min="0"
-                  placeholder="Ej. 50.00"
-                  value={formData.monto_multa}
-                  onChange={(e) => setFormData({ ...formData, monto_multa: e.target.value })}
-                  required
-                />
-                <span style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
-                  Esta multa variable se generará automáticamente a los socios marcados con Falta o si ya concluyó el evento.
-                </span>
-              </FormGroup>
-              <FormGroup>
-                <Label>Descripción / Orden del Día</Label>
-                <Textarea
-                  placeholder="Detalles sobre los puntos a tratar o motivo de la marcha/asamblea..."
-                  value={formData.descripcion}
-                  onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
-                />
-              </FormGroup>
-              <FormActions>
-                <CancelButton type="button" onClick={() => setModalAbierto(false)}>Cancelar</CancelButton>
-                <CreateButton type="submit" disabled={guardando}>
-                  {guardando ? "Creando..." : "Crear y Generar Lista"}
-                </CreateButton>
-              </FormActions>
-            </form>
-          </ModalCard>
-        </ModalOverlay>
-      )}
+      {/* Modal Nuevo Evento */}
+      <Modal
+        isOpen={modalAbierto}
+        onClose={() => { setModalAbierto(false); setErrors({}); }}
+        title="Nuevo Evento / Asamblea"
+        maxWidth="540px"
+      >
+        <form onSubmit={handleSubmit}>
+          <FormGroup>
+            <Label>Nombre del Evento *</Label>
+            <Input
+              name="nombre_evento"
+              placeholder="Ej. Asamblea General Ordinaria / Marcha Central / Reunión de Sector"
+              value={formData.nombre_evento}
+              $hasError={!!errors.nombre_evento}
+              onChange={(e) => {
+                setFormData({ ...formData, nombre_evento: e.target.value });
+                if (errors.nombre_evento) setErrors((p) => ({ ...p, nombre_evento: undefined }));
+              }}
+            />
+            {errors.nombre_evento && <ErrorText>{errors.nombre_evento}</ErrorText>}
+          </FormGroup>
+          <FormGroup>
+            <Label>Tipo de Evento *</Label>
+            <Select
+              value={formData.tipo_evento}
+              onChange={(e) => handleTipoEventoChange(e.target.value)}
+            >
+              <option value="Asamblea">Asamblea General (Multa sugerida 30 Bs)</option>
+              <option value="Marcha">Marcha / Movilización (Multa sugerida 50 Bs)</option>
+              <option value="Reunion">Reunión de Sector (Multa sugerida 20 Bs)</option>
+            </Select>
+          </FormGroup>
+          <FormGroup>
+            <Label>Fecha del Evento *</Label>
+            <Input
+              type="date"
+              value={formData.fecha}
+              $hasError={!!errors.fecha}
+              onChange={(e) => {
+                setFormData({ ...formData, fecha: e.target.value });
+                if (errors.fecha) setErrors((p) => ({ ...p, fecha: undefined }));
+              }}
+            />
+            {errors.fecha && <ErrorText>{errors.fecha}</ErrorText>}
+          </FormGroup>
+          <FormGroup>
+            <Label>Multa por Inasistencia / Falta (Bs) *</Label>
+            <Input
+              type="number"
+              step="0.50"
+              min="0"
+              placeholder="Ej. 30.00"
+              value={formData.monto_multa}
+              $hasError={!!errors.monto_multa}
+              onChange={(e) => {
+                setFormData({ ...formData, monto_multa: e.target.value });
+                if (errors.monto_multa) setErrors((p) => ({ ...p, monto_multa: undefined }));
+              }}
+            />
+            {errors.monto_multa ? (
+              <ErrorText>{errors.monto_multa}</ErrorText>
+            ) : (
+              <span style={{ fontSize: "0.75rem", color: theme.colors.textMuted, marginTop: "0.25rem" }}>
+                Esta multa variable se generará automáticamente a los socios marcados con Falta al cerrar la lista.
+              </span>
+            )}
+          </FormGroup>
+          <FormGroup>
+            <Label>Descripción / Orden del Día</Label>
+            <Textarea
+              placeholder="Detalles sobre los puntos a tratar o motivo de la marcha/asamblea..."
+              value={formData.descripcion}
+              onChange={(e) => setFormData({ ...formData, descripcion: e.target.value })}
+            />
+          </FormGroup>
+          <FormActions>
+            <CancelButton type="button" onClick={() => { setModalAbierto(false); setErrors({}); }}>
+              Cancelar
+            </CancelButton>
+            <CreateButton type="submit" disabled={guardando}>
+              {guardando ? "Creando..." : "Crear y Generar Lista"}
+            </CreateButton>
+          </FormActions>
+        </form>
+      </Modal>
+
+      {/* Confirmar Eliminación */}
+      <ConfirmModal
+        isOpen={Boolean(eventoAEliminar)}
+        onClose={() => setEventoAEliminar(null)}
+        onConfirm={confirmarEliminacion}
+        title="¿Eliminar Evento?"
+        message={`¿Está seguro de eliminar el evento "${eventoAEliminar?.nombre_evento}"? Esta acción borrará el evento y las listas de asistencia asociadas.`}
+        confirmText="Eliminar Evento"
+        isDanger={true}
+        loading={eliminando}
+      />
     </PageContainer>
   );
 }

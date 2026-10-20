@@ -3,6 +3,7 @@ import styled from "styled-components";
 import axios from "axios";
 import { toast } from "react-toastify";
 import Sidebar from "../components/Sidebar";
+import { AlertTriangle, Tag, FileEdit, Save, FileText } from "lucide-react";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
 import theme from "../styles/theme";
@@ -142,7 +143,7 @@ const Label = styled.label`
 const Input = styled.input`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.9rem;
@@ -151,7 +152,8 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    box-shadow: 0 0 0 3px ${({ $hasError }) => ($hasError ? "rgba(239, 68, 68, 0.2)" : "rgba(14, 165, 233, 0.15)")};
   }
 
   &:disabled {
@@ -159,6 +161,13 @@ const Input = styled.input`
     color: ${theme.colors.textMuted};
     cursor: not-allowed;
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
 `;
 
 const CalculationLiveGrid = styled.div`
@@ -224,6 +233,7 @@ function ConsumoLuzPage() {
   );
   const [lecturaActual, setLecturaActual] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const [errors, setErrors] = useState({});
 
   // Cargar datos
   const fetchData = async () => {
@@ -237,7 +247,7 @@ function ConsumoLuzPage() {
       ]);
 
       if (resTarifa.data?.precio_kwh) {
-        setTarifaKwh(parseFloat(resTarifa.data.precio_kwh));
+        setTarifaKwh(parseFloat(resTarifa.data.precio_kwh) || 2.0);
       }
 
       const listaSocios = Array.isArray(resSocios.data)
@@ -273,8 +283,10 @@ function ConsumoLuzPage() {
         setSocioSeleccionadoId(listaSocios[0].id_socio);
       }
     } catch (err) {
-      console.error(err);
-      toast.error("Error al cargar datos de consumo de luz", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar datos de consumo de luz",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -335,37 +347,39 @@ function ConsumoLuzPage() {
   const handleCambiarSocio = (id) => {
     setSocioSeleccionadoId(id);
     setLecturaActual("");
+    setErrors({});
   };
 
   // Guardar nueva lectura
   const handleSubmitLectura = async (e) => {
     e.preventDefault();
-
-    const act = parseFloat(lecturaActual);
-    if (isNaN(act)) {
-      toast.error("Por favor ingresa la lectura actual del medidor", toastOptions);
-      return;
+    const errs = {};
+    if (!fechaLectura) {
+      errs.fechaLectura = "La fecha de lectura es obligatoria";
     }
 
-    if (act < lecturaAnterior) {
-      toast.error(
-        `La lectura actual (${act} kWh) no puede ser menor a la lectura anterior (${lecturaAnterior} kWh)`,
-        toastOptions
-      );
-      return;
+    const act = parseFloat(lecturaActual);
+    if (!lecturaActual || isNaN(act)) {
+      errs.lecturaActual = "Por favor ingresa la lectura actual del medidor";
+    } else if (act < lecturaAnterior) {
+      errs.lecturaActual = `La lectura actual (${act} kWh) no puede ser menor a la lectura anterior (${lecturaAnterior} kWh)`;
     }
 
     if (ultimaLecturaObj) {
-      const dNueva = new Date(fechaLectura);
-      const dUlt = new Date(ultimaLecturaObj.fecha_lectura);
-      if (dNueva < dUlt) {
-        toast.error(
-          `La fecha de lectura (${formatDate(fechaLectura)}) no puede ser anterior a la última lectura registrada (${formatDate(ultimaLecturaObj.fecha_lectura)})`,
-          toastOptions
-        );
-        return;
+      const fNuevaStr = String(fechaLectura).slice(0, 10);
+      const fUltStr = String(ultimaLecturaObj.fecha_lectura).slice(0, 10);
+      if (fNuevaStr < fUltStr) {
+        errs.fechaLectura = `No puede ser anterior a la última lectura registrada (${formatDate(ultimaLecturaObj.fecha_lectura)})`;
       }
     }
+
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      toast.error("Corrige los campos marcados en rojo", toastOptions);
+      return;
+    }
+
+    setErrors({});
 
     try {
       setGuardando(true);
@@ -414,7 +428,7 @@ function ConsumoLuzPage() {
             <h1>Toma y Registro de Consumo de Luz</h1>
             <p>
               Ronda mensual de medidores por caseta — Tarifa Oficial:{" "}
-              <strong>1 kWh = 2.00 Bs</strong>
+              <strong>1 kWh = {tarifaKwh.toFixed(2)} Bs</strong>
             </p>
           </div>
         </SectionHeader>
@@ -482,9 +496,12 @@ function ConsumoLuzPage() {
                               padding: "0.2rem 0.4rem",
                               borderRadius: "4px",
                               fontWeight: 700,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "3px",
                             }}
                           >
-                            ⚠️ {pendientes} meses
+                            <AlertTriangle size={11} /> {pendientes} meses
                           </span>
                         ) : pendientes === 1 ? (
                           <span
@@ -544,9 +561,12 @@ function ConsumoLuzPage() {
                           borderRadius: "999px",
                           fontWeight: 700,
                           border: "1px solid rgba(14, 165, 233, 0.3)",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
                         }}
                       >
-                        🏷️ Propietario de {socioActivo.total_casetas_dueno} casetas (#{socioActivo.todas_casetas?.join(", #")})
+                        <Tag size={12} /> Propietario de {socioActivo.total_casetas_dueno} casetas (#{socioActivo.todas_casetas?.join(", #")})
                       </span>
                     )}
                   </div>
@@ -592,13 +612,13 @@ function ConsumoLuzPage() {
 
               {/* Formulario de Toma de Lectura */}
               <FormContainerCard>
-                <h3 style={{ fontSize: "1.05rem", fontWeight: 700, color: theme.colors.textMain, marginBottom: "1rem" }}>
-                  📝 Ingresar Nueva Lecturación del Medidor
+                <h3 style={{ fontSize: "1.05rem", fontWeight: 700, color: theme.colors.textMain, marginBottom: "1rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <FileEdit size={16} /> Ingresar Nueva Lecturación del Medidor
                 </h3>
 
                 {alertaraTercerMesMora && (
                   <MoraWarningBanner>
-                    <span style={{ fontSize: "1.5rem" }}>⚠️</span>
+                    <AlertTriangle size={24} color="#ef4444" style={{ flexShrink: 0 }} />
                     <div>
                       <strong>Alerta de Sanción por Mora:</strong> Este socio ya tiene{" "}
                       <strong>{mesesImpagosCount} meses de luz impagos</strong>. Al registrar esta
@@ -616,9 +636,13 @@ function ConsumoLuzPage() {
                       <Input
                         type="date"
                         value={fechaLectura}
-                        onChange={(e) => setFechaLectura(e.target.value)}
-                        required
+                        $hasError={!!errors.fechaLectura}
+                        onChange={(e) => {
+                          setFechaLectura(e.target.value);
+                          if (errors.fechaLectura) setErrors((p) => ({ ...p, fechaLectura: undefined }));
+                        }}
                       />
+                      {errors.fechaLectura && <ErrorText>{errors.fechaLectura}</ErrorText>}
                     </FormGroup>
 
                     <FormGroup>
@@ -640,10 +664,14 @@ function ConsumoLuzPage() {
                         min={lecturaAnterior}
                         placeholder={`Mínimo: ${lecturaAnterior}`}
                         value={lecturaActual}
-                        onChange={(e) => setLecturaActual(e.target.value)}
-                        required
+                        $hasError={!!errors.lecturaActual}
+                        onChange={(e) => {
+                          setLecturaActual(e.target.value);
+                          if (errors.lecturaActual) setErrors((p) => ({ ...p, lecturaActual: undefined }));
+                        }}
                         autoFocus
                       />
+                      {errors.lecturaActual && <ErrorText>{errors.lecturaActual}</ErrorText>}
                     </FormGroup>
                   </div>
 
@@ -685,10 +713,12 @@ function ConsumoLuzPage() {
                     <CreateButton
                       type="submit"
                       disabled={guardando || !lecturaActual || parseFloat(lecturaActual) < lecturaAnterior}
+                      style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
                     >
+                      <Save size={16} />
                       {guardando
                         ? "Registrando..."
-                        : `💾 Guardar Lectura y Generar Cargo (${importeTotal.toFixed(2)} Bs)`}
+                        : `Guardar Lectura y Generar Cargo (${importeTotal.toFixed(2)} Bs)`}
                     </CreateButton>
                   </div>
                 </form>
@@ -697,8 +727,8 @@ function ConsumoLuzPage() {
               {/* Historial de Lecturas del Socio */}
               <TableCard>
                 <div style={{ padding: "1rem 1.25rem", borderBottom: `1px solid ${theme.colors.border}` }}>
-                  <strong style={{ fontSize: "0.95rem", color: theme.colors.textMain }}>
-                    📋 Historial de Lecturaciones del Medidor (Caseta #{socioActivo.nro_caseta})
+                  <strong style={{ fontSize: "0.95rem", color: theme.colors.textMain, display: "flex", alignItems: "center", gap: "6px" }}>
+                    <FileText size={16} /> Historial de Lecturaciones del Medidor (Caseta #{socioActivo.nro_caseta})
                   </strong>
                 </div>
 
@@ -727,18 +757,18 @@ function ConsumoLuzPage() {
                             <TableCell>
                               <strong>{formatDate(item.fecha_lectura)}</strong>
                             </TableCell>
-                            <TableCell>{item.mes_anio}</TableCell>
-                            <TableCell>{parseFloat(item.lectura_anterior).toFixed(2)} kWh</TableCell>
+                            <TableCell>{item.mes_anio || "-"}</TableCell>
+                            <TableCell>{parseFloat(item.lectura_anterior || 0).toFixed(2)} kWh</TableCell>
                             <TableCell>
                               <strong style={{ color: theme.colors.textMain }}>
-                                {parseFloat(item.lectura_actual).toFixed(2)} kWh
+                                {parseFloat(item.lectura_actual || 0).toFixed(2)} kWh
                               </strong>
                             </TableCell>
                             <TableCell style={{ fontWeight: 700, color: theme.colors.primary }}>
-                              {parseFloat(item.kwh_consumidos).toFixed(2)} kWh
+                              {parseFloat(item.kwh_consumidos || 0).toFixed(2)} kWh
                             </TableCell>
                             <TableCell style={{ fontWeight: 800, color: theme.colors.success }}>
-                              {parseFloat(item.monto_calculado).toFixed(2)} Bs
+                              {parseFloat(item.monto_calculado || 0).toFixed(2)} Bs
                             </TableCell>
                           </TableRow>
                         ))

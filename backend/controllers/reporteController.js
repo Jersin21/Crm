@@ -4,15 +4,21 @@ const { Ingreso, Egreso, Cargo, Socio, Persona, IngresoDetalle, ConceptoCobro, T
 
 /**
  * Helper para construir filtro de fechas que cubra el día completo (00:00:00 hasta 23:59:59)
+ * con validación de fechas válidas para evitar errores de parseo en base de datos.
  */
 function construirFiltroFechas(fecha_inicio, fecha_fin) {
-  if (fecha_inicio && fecha_fin) {
+  const esFechaValida = (f) => f && !isNaN(new Date(f).getTime());
+
+  const inicioValido = esFechaValida(fecha_inicio);
+  const finValido = esFechaValida(fecha_fin);
+
+  if (inicioValido && finValido) {
     const dInicio = new Date(`${fecha_inicio}T00:00:00.000`);
     const dFin = new Date(`${fecha_fin}T23:59:59.999`);
     return { [Op.between]: [dInicio, dFin] };
-  } else if (fecha_inicio) {
+  } else if (inicioValido) {
     return { [Op.gte]: new Date(`${fecha_inicio}T00:00:00.000`) };
-  } else if (fecha_fin) {
+  } else if (finValido) {
     return { [Op.lte]: new Date(`${fecha_fin}T23:59:59.999`) };
   }
   return null;
@@ -23,7 +29,15 @@ function construirFiltroFechas(fecha_inicio, fecha_fin) {
  */
 const getReporteIngresos = async (req, res, next) => {
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const { fecha_inicio, fecha_fin } = req.query;
 
     const filtro = { id_asociacion, estado: 'Valido', deleted_at: null };
@@ -41,7 +55,7 @@ const getReporteIngresos = async (req, res, next) => {
       order: [['fecha_pago', 'DESC']],
     });
 
-    const total = ingresos.reduce((acc, i) => acc + parseFloat(i.monto_total_recibido), 0);
+    const total = ingresos.reduce((acc, i) => acc + parseFloat(i.monto_total_recibido || 0), 0);
 
     return res.status(200).json({
       ingresos,
@@ -59,7 +73,15 @@ const getReporteIngresos = async (req, res, next) => {
  */
 const getReporteEgresos = async (req, res, next) => {
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const { fecha_inicio, fecha_fin } = req.query;
 
     const filtro = { id_asociacion, deleted_at: null };
@@ -74,7 +96,7 @@ const getReporteEgresos = async (req, res, next) => {
       order: [['fecha_gasto', 'DESC']],
     });
 
-    const total = egresos.reduce((acc, e) => acc + parseFloat(e.monto), 0);
+    const total = egresos.reduce((acc, e) => acc + parseFloat(e.monto || 0), 0);
 
     return res.status(200).json({
       egresos,
@@ -93,21 +115,29 @@ const getReporteEgresos = async (req, res, next) => {
  */
 const getReporteBalanceGeneral = async (req, res, next) => {
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const { fecha_inicio, fecha_fin } = req.query;
 
     const filtroIngreso = { id_asociacion, estado: 'Valido', deleted_at: null };
-    const filtroEgreso  = { id_asociacion, deleted_at: null };
+    const filtroEgreso = { id_asociacion, deleted_at: null };
 
     const dateRange = construirFiltroFechas(fecha_inicio, fecha_fin);
     if (dateRange) {
-      filtroIngreso.fecha_pago  = dateRange;
-      filtroEgreso.fecha_gasto  = dateRange;
+      filtroIngreso.fecha_pago = dateRange;
+      filtroEgreso.fecha_gasto = dateRange;
     }
 
     // ─── CÁLCULO DE SALDO INICIAL (Flujo neto acumulado antes de fecha_inicio) ─
     let saldoInicial = 0;
-    if (fecha_inicio) {
+    if (fecha_inicio && !isNaN(new Date(fecha_inicio).getTime())) {
       const dInicio = new Date(`${fecha_inicio}T00:00:00.000`);
       const [sumPrevIngresos, sumPrevEgresos] = await Promise.all([
         Ingreso.findAll({
@@ -143,7 +173,8 @@ const getReporteBalanceGeneral = async (req, res, next) => {
           { model: Socio, as: 'socio', include: [{ model: Persona, as: 'persona' }] },
           { model: Usuario, as: 'cajero', attributes: ['username'] },
           {
-            model: IngresoDetalle, as: 'detalles',
+            model: IngresoDetalle,
+            as: 'detalles',
             include: [{ model: Cargo, as: 'cargo', include: [{ model: ConceptoCobro, as: 'concepto' }] }],
           },
         ],
@@ -160,9 +191,9 @@ const getReporteBalanceGeneral = async (req, res, next) => {
     ]);
 
     const totalIngresos = listaIngresos.reduce((acc, i) => acc + parseFloat(i.monto_total_recibido || 0), 0);
-    const totalEgresos  = listaEgresos.reduce((acc, e) => acc + parseFloat(e.monto || 0), 0);
-    const flujoPeriodo  = totalIngresos - totalEgresos;
-    const saldoFinal    = saldoInicial + flujoPeriodo;
+    const totalEgresos = listaEgresos.reduce((acc, e) => acc + parseFloat(e.monto || 0), 0);
+    const flujoPeriodo = totalIngresos - totalEgresos;
+    const saldoFinal = saldoInicial + flujoPeriodo;
 
     // ─── AGREGACIÓN PÚBLICA PARA ASAMBLEAS (SIN DUPLICADOS DE CONCEPTOS) ───────
     const agrupacionIngresos = {};
@@ -191,7 +222,7 @@ const getReporteBalanceGeneral = async (req, res, next) => {
           const mor = parseFloat(det.monto_abonado_mora || 0);
           agrupacionIngresos[key].total_capital += cap;
           agrupacionIngresos[key].total_mora += mor;
-          agrupacionIngresos[key].total_recaudado += (cap + mor);
+          agrupacionIngresos[key].total_recaudado += cap + mor;
         }
       } else {
         const conceptoNombre = ing.concepto || ing.tipo_origen || 'Otros Cobros Directos';
@@ -214,17 +245,20 @@ const getReporteBalanceGeneral = async (req, res, next) => {
       }
     }
 
-    const resumenIngresosPublico = Object.values(agrupacionIngresos).map(item => ({
-      concepto: item.concepto,
-      cantidad_socios: item.sociosSet.size,
-      cantidad_pagos: item.cantidad_pagos,
-      total_capital: parseFloat(item.total_capital.toFixed(2)),
-      total_mora: parseFloat(item.total_mora.toFixed(2)),
-      total_recaudado: parseFloat(item.total_recaudado.toFixed(2)),
-      glosa_publica: item.sociosSet.size > 0
-        ? `${item.sociosSet.size} socio(s) aportaron/pagaron ${item.concepto}`
-        : `${item.cantidad_pagos} pago(s) registrado(s) por ${item.concepto}`,
-    })).sort((a, b) => b.total_recaudado - a.total_recaudado);
+    const resumenIngresosPublico = Object.values(agrupacionIngresos)
+      .map((item) => ({
+        concepto: item.concepto,
+        cantidad_socios: item.sociosSet.size,
+        cantidad_pagos: item.cantidad_pagos,
+        total_capital: parseFloat(item.total_capital.toFixed(2)),
+        total_mora: parseFloat(item.total_mora.toFixed(2)),
+        total_recaudado: parseFloat(item.total_recaudado.toFixed(2)),
+        glosa_publica:
+          item.sociosSet.size > 0
+            ? `${item.sociosSet.size} socio(s) aportaron/pagaron ${item.concepto}`
+            : `${item.cantidad_pagos} pago(s) registrado(s) por ${item.concepto}`,
+      }))
+      .sort((a, b) => b.total_recaudado - a.total_recaudado);
 
     // Agrupación pública de egresos por categoría
     const agrupacionEgresos = {};
@@ -246,25 +280,27 @@ const getReporteBalanceGeneral = async (req, res, next) => {
       }
     }
 
-    const resumenEgresosPublico = Object.values(agrupacionEgresos).map(item => ({
-      categoria: item.categoria,
-      cantidad_desembolsos: item.cantidad_desembolsos,
-      total_egresado: parseFloat(item.total_egresado.toFixed(2)),
-      detalles: item.detalles.slice(0, 3).join(', '),
-    })).sort((a, b) => b.total_egresado - a.total_egresado);
+    const resumenEgresosPublico = Object.values(agrupacionEgresos)
+      .map((item) => ({
+        categoria: item.categoria,
+        cantidad_desembolsos: item.cantidad_desembolsos,
+        total_egresado: parseFloat(item.total_egresado.toFixed(2)),
+        detalles: item.detalles.slice(0, 3).join(', '),
+      }))
+      .sort((a, b) => b.total_egresado - a.total_egresado);
 
     return res.status(200).json({
       ingresos: listaIngresos,
       egresos: listaEgresos,
       resumen_ingresos_publico: resumenIngresosPublico,
       resumen_egresos_publico: resumenEgresosPublico,
-      saldo_inicial:   parseFloat(saldoInicial.toFixed(2)),
-      total_ingresos:  totalIngresos.toFixed(2),
-      total_egresos:   totalEgresos.toFixed(2),
-      flujo_periodo:   parseFloat(flujoPeriodo.toFixed(2)),
-      balance:         flujoPeriodo.toFixed(2),
-      saldoNeto:       parseFloat(flujoPeriodo.toFixed(2)),
-      saldo_final:     parseFloat(saldoFinal.toFixed(2)),
+      saldo_inicial: parseFloat(saldoInicial.toFixed(2)),
+      total_ingresos: totalIngresos.toFixed(2),
+      total_egresos: totalEgresos.toFixed(2),
+      flujo_periodo: parseFloat(flujoPeriodo.toFixed(2)),
+      balance: flujoPeriodo.toFixed(2),
+      saldoNeto: parseFloat(flujoPeriodo.toFixed(2)),
+      saldo_final: parseFloat(saldoFinal.toFixed(2)),
       asociacionNombre: asociacion?.nombre_mercado || 'Asociación Central de Comerciantes',
       periodo: { fecha_inicio, fecha_fin },
     });
@@ -278,12 +314,27 @@ const getReporteBalanceGeneral = async (req, res, next) => {
  */
 const getDashboardStats = async (req, res, next) => {
   try {
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
+
     const ahora = new Date();
     const dInicioMes = new Date(ahora.getFullYear(), ahora.getMonth(), 1, 0, 0, 0, 0);
     const dFinMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0, 23, 59, 59, 999);
 
-    const [totalSocios, cargosPendientes, ingresosMesResult, ingresosTotalesResult, egresosMesResult, egresosTotalesResult] = await Promise.all([
+    const [
+      totalSocios,
+      cargosPendientes,
+      ingresosMesResult,
+      ingresosTotalesResult,
+      egresosMesResult,
+      egresosTotalesResult,
+    ] = await Promise.all([
       Socio.count({
         where: { id_asociacion, estado_socio: 'Activo', deleted_at: null },
       }),
@@ -348,7 +399,14 @@ const getDashboardStats = async (req, res, next) => {
 const getEstadoCuentaSocio = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const id_asociacion = req.user.id_asociacion;
+    const id_asociacion =
+      req.user.rol === 'SUPERADMIN_SAAS' && (req.query.id_asociacion || req.body.id_asociacion)
+        ? req.query.id_asociacion || req.body.id_asociacion
+        : req.user.id_asociacion;
+
+    if (!id_asociacion) {
+      return res.status(400).json({ mensaje: 'Debe especificar la asociación.' });
+    }
 
     const socio = await Socio.findOne({
       where: { id_socio: id, id_asociacion, deleted_at: null },
@@ -359,11 +417,14 @@ const getEstadoCuentaSocio = async (req, res, next) => {
     });
     if (!socio) return res.status(404).json({ mensaje: 'Socio no encontrado.' });
 
-    // Obtener todos los cargos ordenados cronológicamente
+    // Obtener todos los cargos del socio en esta asociación ordenados cronológicamente
     const cargos = await Cargo.findAll({
-      where: { id_socio: id, deleted_at: null },
+      where: { id_socio: id, id_asociacion, deleted_at: null },
       include: [{ model: ConceptoCobro, as: 'concepto' }],
-      order: [['created_at', 'ASC'], ['fecha_vencimiento', 'ASC']],
+      order: [
+        ['created_at', 'ASC'],
+        ['fecha_vencimiento', 'ASC'],
+      ],
     });
 
     // Obtener historial de pagos válidos
@@ -388,7 +449,9 @@ const getEstadoCuentaSocio = async (req, res, next) => {
         tipo: 'CARGO',
         fecha: fecha ? new Date(fecha).toISOString().split('T')[0] : 'Sin fecha',
         fecha_obj: fecha ? new Date(fecha) : new Date(0),
-        descripcion: c.concepto?.nombre_concepto ? `${c.concepto.nombre_concepto} - ${c.detalle || ''}`.trim() : (c.detalle || 'Cargo emitido'),
+        descripcion: c.concepto?.nombre_concepto
+          ? `${c.concepto.nombre_concepto} - ${c.detalle || ''}`.trim()
+          : c.detalle || 'Cargo emitido',
         periodo: c.periodo || '-',
         debe: montoTotal,
         haber: 0,
@@ -407,7 +470,9 @@ const getEstadoCuentaSocio = async (req, res, next) => {
         tipo: 'PAGO',
         fecha: fecha ? new Date(fecha).toISOString().split('T')[0] : 'Sin fecha',
         fecha_obj: fecha ? new Date(fecha) : new Date(0),
-        descripcion: ing.concepto ? `Cobro en Caja: ${ing.concepto}` : (ing.observacion || 'Cobro de recibo oficial en Caja'),
+        descripcion: ing.concepto
+          ? `Cobro en Caja: ${ing.concepto}`
+          : ing.observacion || 'Cobro de recibo oficial en Caja',
         periodo: '-',
         debe: 0,
         haber: montoTotal,
@@ -424,15 +489,21 @@ const getEstadoCuentaSocio = async (req, res, next) => {
     // Calcular saldo acumulado correlativo (Kardex financiero)
     let saldoAcumulado = 0;
     movimientos.forEach((m) => {
-      saldoAcumulado += (m.debe - m.haber);
+      saldoAcumulado += m.debe - m.haber;
       m.saldo_acumulado = parseFloat(saldoAcumulado.toFixed(2));
     });
 
-    const pendientes = cargos.filter(c => ['Pendiente', 'Pagado_Parcial'].includes(c.estado));
-    const totalDeuda = pendientes.reduce((acc, c) =>
-      acc + parseFloat(c.saldo_capital_pendiente) + parseFloat(c.monto_mora_acumulada), 0
+    const pendientes = cargos.filter((c) => ['Pendiente', 'Pagado_Parcial'].includes(c.estado));
+    const totalDeuda = pendientes.reduce(
+      (acc, c) =>
+        acc + parseFloat(c.saldo_capital_pendiente || 0) + parseFloat(c.monto_mora_acumulada || 0),
+      0
     );
-    const totalCargado = cargos.reduce((acc, c) => acc + parseFloat(c.monto_capital_inicial || 0) + parseFloat(c.monto_mora_acumulada || 0), 0);
+    const totalCargado = cargos.reduce(
+      (acc, c) =>
+        acc + parseFloat(c.monto_capital_inicial || 0) + parseFloat(c.monto_mora_acumulada || 0),
+      0
+    );
     const totalPagado = ingresos.reduce((acc, i) => acc + parseFloat(i.monto_total_recibido || 0), 0);
 
     return res.status(200).json({
@@ -460,3 +531,4 @@ module.exports = {
   getDashboardStats,
   getEstadoCuentaSocio,
 };
+

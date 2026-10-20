@@ -3,6 +3,19 @@ import styled from "styled-components";
 import axios from "axios";
 import { toast } from "react-toastify";
 import { PDFDownloadLink } from "@react-pdf/renderer";
+import {
+  Printer,
+  FileText,
+  Megaphone,
+  BookOpen,
+  Search,
+  Calendar,
+  BarChart2,
+  Calculator,
+  TrendingUp,
+  TrendingDown,
+  Users,
+} from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import useAuth from "../hooks/authHooks";
 import useDebounce from "../hooks/useDebounce";
@@ -51,10 +64,15 @@ const FilterGroup = styled.div`
   input, select {
     padding: 0.5rem 0.75rem;
     background-color: ${theme.colors.bgInput};
-    border: 1px solid ${theme.colors.border};
+    border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
     border-radius: ${theme.radius.sm};
     color: ${theme.colors.textMain};
     font-size: 0.85rem;
+
+    &:focus {
+      outline: none;
+      border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    }
   }
 `;
 
@@ -119,6 +137,7 @@ function ReportesPage() {
   const [modoVista, setModoVista] = useState("detallado"); // "detallado" | "asamblea" | "kardex"
   const [fechaInicio, setFechaInicio] = useState(primerDiaMes);
   const [fechaFin, setFechaFin] = useState(fechaHoy);
+  const [fechaError, setFechaError] = useState("");
   const [reporte, setReporte] = useState({
     ingresos: [],
     egresos: [],
@@ -159,24 +178,36 @@ function ReportesPage() {
         egresos: data.egresos || [],
         resumen_ingresos_publico: data.resumen_ingresos_publico || [],
         resumen_egresos_publico: data.resumen_egresos_publico || [],
-        saldo_inicial: parseFloat(data.saldo_inicial || 0),
-        totalIngresos: parseFloat(data.totalIngresos || data.total_ingresos || 0),
-        totalEgresos: parseFloat(data.totalEgresos || data.total_egresos || 0),
-        flujo_periodo: parseFloat(data.flujo_periodo || data.balance || 0),
-        saldo_final: parseFloat(data.saldo_final || 0),
-        saldoNeto: parseFloat(data.saldoNeto || data.balance || 0),
+        saldo_inicial: parseFloat(data.saldo_inicial || 0) || 0,
+        totalIngresos: parseFloat(data.totalIngresos || data.total_ingresos || 0) || 0,
+        totalEgresos: parseFloat(data.totalEgresos || data.total_egresos || 0) || 0,
+        flujo_periodo: parseFloat(data.flujo_periodo || data.balance || 0) || 0,
+        saldo_final: parseFloat(data.saldo_final || 0) || 0,
+        saldoNeto: parseFloat(data.saldoNeto || data.balance || 0) || 0,
         asociacionNombre: data.asociacionNombre || "Asociación Central de Comerciantes",
       });
     } catch (err) {
-      toast.error("Error al generar el reporte de caja", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al generar el reporte de caja",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchBalance = () => fetchBalanceConFechas(fechaInicio, fechaFin);
+  const fetchBalance = () => {
+    if (fechaInicio && fechaFin && fechaInicio > fechaFin) {
+      setFechaError("La fecha 'Desde' no puede ser posterior a 'Hasta'");
+      toast.error("La fecha 'Desde' no puede ser posterior a 'Hasta'", toastOptions);
+      return;
+    }
+    setFechaError("");
+    fetchBalanceConFechas(fechaInicio, fechaFin);
+  };
 
   const aplicarPreset = (tipo) => {
+    setFechaError("");
     const ahora = new Date();
     if (tipo === "hoy") {
       const hoyStr = ahora.toISOString().split("T")[0];
@@ -213,7 +244,7 @@ function ReportesPage() {
         fetchKardexSocio(lista[0].id_socio);
       }
     } catch (e) {
-      console.error(e);
+      toast.error("Error al cargar la lista de socios", toastOptions);
     }
   };
 
@@ -225,7 +256,10 @@ function ReportesPage() {
       const { data } = await axios.get(`${reportesRoute}/socio/${idSocio}`, auth.config);
       setKardexData(data);
     } catch (err) {
-      toast.error("Error al cargar el Kardex del socio", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar el Kardex del socio",
+        toastOptions
+      );
     } finally {
       setLoadingKardex(false);
     }
@@ -282,7 +316,7 @@ function ReportesPage() {
                 >
                   {({ loading: pdfLoading }) => (
                     <ActionButton $variant="primary" disabled={pdfLoading || loadingKardex}>
-                      {pdfLoading ? "Generando..." : "🖨️ Descargar Kardex B&N (PDF)"}
+                      <Printer size={16} /> {pdfLoading ? "Generando..." : "Descargar Kardex B&N (PDF)"}
                     </ActionButton>
                   )}
                 </PDFDownloadLink>
@@ -303,7 +337,7 @@ function ReportesPage() {
                 >
                   {({ loading: pdfLoading }) => (
                     <ActionButton $variant="outline" disabled={pdfLoading || loading}>
-                      {pdfLoading ? "Generando..." : "📋 PDF Detallado B&N"}
+                      <FileText size={16} /> {pdfLoading ? "Generando..." : "PDF Detallado B&N"}
                     </ActionButton>
                   )}
                 </PDFDownloadLink>
@@ -322,7 +356,7 @@ function ReportesPage() {
                 >
                   {({ loading: pdfLoading }) => (
                     <ActionButton $variant="primary" disabled={pdfLoading || loading}>
-                      {pdfLoading ? "Generando..." : "📢 PDF Asamblea B&N"}
+                      <Megaphone size={16} /> {pdfLoading ? "Generando..." : "PDF Asamblea B&N"}
                     </ActionButton>
                   )}
                 </PDFDownloadLink>
@@ -351,7 +385,7 @@ function ReportesPage() {
               transition: "all 0.2s ease",
             }}
           >
-            📋 1. Libro Mayor Detallado (Directiva)
+            <FileText size={16} /> 1. Libro Mayor Detallado (Directiva)
           </button>
           <button
             type="button"
@@ -371,7 +405,7 @@ function ReportesPage() {
               transition: "all 0.2s ease",
             }}
           >
-            📢 2. Resumen para Asamblea de Socios
+            <Megaphone size={16} /> 2. Resumen para Asamblea de Socios
           </button>
           <button
             type="button"
@@ -391,57 +425,71 @@ function ReportesPage() {
               transition: "all 0.2s ease",
             }}
           >
-            📚 3. Kardex Histórico por Caseta / Socio
+            <BookOpen size={16} /> 3. Kardex Histórico por Caseta / Socio
           </button>
         </div>
 
         {modoVista !== "kardex" ? (
           <>
             <DateFilterBar>
-              <FilterGroup>
+              <FilterGroup $hasError={!!fechaError}>
                 <label>Desde:</label>
                 <input
                   type="date"
                   value={fechaInicio}
-                  onChange={(e) => setFechaInicio(e.target.value)}
+                  onChange={(e) => {
+                    setFechaInicio(e.target.value);
+                    if (fechaError) setFechaError("");
+                  }}
                 />
               </FilterGroup>
-              <FilterGroup>
+              <FilterGroup $hasError={!!fechaError}>
                 <label>Hasta:</label>
                 <input
                   type="date"
                   value={fechaFin}
-                  onChange={(e) => setFechaFin(e.target.value)}
+                  onChange={(e) => {
+                    setFechaFin(e.target.value);
+                    if (fechaError) setFechaError("");
+                  }}
                 />
               </FilterGroup>
               <ActionButton $variant="primary" onClick={fetchBalance} disabled={loading}>
-                {loading ? "Calculando..." : "🔍 Filtrar"}
+                <Search size={14} /> {loading ? "Calculando..." : "Filtrar"}
               </ActionButton>
 
               <div style={{ display: "flex", gap: "0.5rem", marginLeft: "auto", flexWrap: "wrap" }}>
                 <ActionButton $variant="outline" onClick={() => aplicarPreset("hoy")}>
-                  📅 Hoy
+                  <Calendar size={14} /> Hoy
                 </ActionButton>
                 <ActionButton $variant="outline" onClick={() => aplicarPreset("mes_actual")}>
-                  📅 Este Mes
+                  <Calendar size={14} /> Este Mes
                 </ActionButton>
                 <ActionButton $variant="outline" onClick={() => aplicarPreset("mes_anterior")}>
-                  📅 Mes Anterior
+                  <Calendar size={14} /> Mes Anterior
                 </ActionButton>
                 <ActionButton $variant="outline" onClick={() => aplicarPreset("todo")}>
-                  📊 Todo el Histórico
+                  <BarChart2 size={14} /> Todo el Histórico
                 </ActionButton>
               </div>
             </DateFilterBar>
 
+            {fechaError && (
+              <div style={{ color: theme.colors.danger, fontSize: "0.85rem", marginTop: "-1rem", marginBottom: "1rem" }}>
+                {fechaError}
+              </div>
+            )}
+
             {/* Cuadre Contable con Saldo Inicial */}
             <CuadreAlertBox>
               <div className="formula">
-                <span>🧮 <strong>Cuadre de Caja:</strong></span>
-                <span>Saldo Inicial: <strong>{reporte.saldo_inicial.toFixed(2)} Bs</strong></span>
-                <span>+ Ingresos: <strong>{reporte.totalIngresos.toFixed(2)} Bs</strong></span>
-                <span>- Egresos: <strong>{reporte.totalEgresos.toFixed(2)} Bs</strong></span>
-                <span>= Saldo Final en Caja: <strong>{reporte.saldo_final.toFixed(2)} Bs</strong></span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "0.35rem" }}>
+                  <Calculator size={16} /> <strong>Cuadre de Caja:</strong>
+                </span>
+                <span>Saldo Inicial: <strong>{(reporte.saldo_inicial || 0).toFixed(2)} Bs</strong></span>
+                <span>+ Ingresos: <strong>{(reporte.totalIngresos || 0).toFixed(2)} Bs</strong></span>
+                <span>- Egresos: <strong>{(reporte.totalEgresos || 0).toFixed(2)} Bs</strong></span>
+                <span>= Saldo Final en Caja: <strong>{(reporte.saldo_final || 0).toFixed(2)} Bs</strong></span>
               </div>
               <span style={{ fontSize: "0.78rem", color: theme.colors.textMuted }}>
                 Documento configurado en Blanco y Negro para impresión oficial
@@ -453,31 +501,31 @@ function ReportesPage() {
               <MetricCard>
                 <span className="label">Saldo Anterior (Inicial)</span>
                 <h2 style={{ color: theme.colors.textMain }}>
-                  {reporte.saldo_inicial.toFixed(2)} Bs
+                  {(reporte.saldo_inicial || 0).toFixed(2)} Bs
                 </h2>
               </MetricCard>
               <MetricCard>
                 <span className="label">(+) Total Entradas / Cobros</span>
                 <h2 style={{ color: theme.colors.success }}>
-                  + {reporte.totalIngresos.toFixed(2)} Bs
+                  + {(reporte.totalIngresos || 0).toFixed(2)} Bs
                 </h2>
               </MetricCard>
               <MetricCard>
                 <span className="label">(-) Total Salidas / Gastos</span>
                 <h2 style={{ color: theme.colors.danger }}>
-                  - {reporte.totalEgresos.toFixed(2)} Bs
+                  - {(reporte.totalEgresos || 0).toFixed(2)} Bs
                 </h2>
               </MetricCard>
               <MetricCard>
                 <span className="label">(=) Flujo Neto del Período</span>
                 <h2 style={{ color: reporte.flujo_periodo >= 0 ? theme.colors.primary : theme.colors.danger }}>
-                  {reporte.flujo_periodo >= 0 ? "+" : ""}{reporte.flujo_periodo.toFixed(2)} Bs
+                  {reporte.flujo_periodo >= 0 ? "+" : ""}{(reporte.flujo_periodo || 0).toFixed(2)} Bs
                 </h2>
               </MetricCard>
               <MetricCard style={{ borderLeft: `4px solid ${theme.colors.primary}` }}>
                 <span className="label">(=) Saldo Final en Caja</span>
                 <h2 style={{ color: reporte.saldo_final >= 0 ? theme.colors.success : theme.colors.danger }}>
-                  {reporte.saldo_final.toFixed(2)} Bs
+                  {(reporte.saldo_final || 0).toFixed(2)} Bs
                 </h2>
               </MetricCard>
             </SummaryGrid>
@@ -488,8 +536,8 @@ function ReportesPage() {
                 {/* Tabla Detalle Ingresos */}
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                    <h3 style={{ fontSize: "1.05rem", color: theme.colors.textMain }}>
-                      📥 Detalle de Ingresos Registrados ({reporte.ingresos.length})
+                    <h3 style={{ fontSize: "1.05rem", color: theme.colors.textMain, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <TrendingUp size={18} color={theme.colors.success} /> Detalle de Ingresos Registrados ({reporte.ingresos.length})
                     </h3>
                   </div>
                   <TableCard>
@@ -542,8 +590,8 @@ function ReportesPage() {
                 {/* Tabla Detalle Egresos */}
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                    <h3 style={{ fontSize: "1.05rem", color: theme.colors.textMain }}>
-                      📤 Detalle de Salidas y Gastos ({reporte.egresos.length})
+                    <h3 style={{ fontSize: "1.05rem", color: theme.colors.textMain, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <TrendingDown size={18} color={theme.colors.danger} /> Detalle de Salidas y Gastos ({reporte.egresos.length})
                     </h3>
                   </div>
                   <TableCard>
@@ -586,13 +634,13 @@ function ReportesPage() {
                 </div>
               </div>
             ) : (
-              /* MODO 2: RESUMEN SENCILLO DE ASAMBLEA PARA SOCIOS (AGRUPADO SIN DUPLICADOS) */
+              /* MODO 2: RESUMEN SENCILLO DE ASAMBLEA PARA SOCIOS */
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5rem" }}>
                 {/* Tabla Resumen Ingresos Asamblea */}
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                    <h3 style={{ fontSize: "1.05rem", color: theme.colors.textMain }}>
-                      📥 1. ¿De qué se recaudó? (Consolidado por Concepto)
+                    <h3 style={{ fontSize: "1.05rem", color: theme.colors.textMain, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <TrendingUp size={18} color={theme.colors.success} /> 1. ¿De qué se recaudó? (Consolidado por Concepto)
                     </h3>
                     <span style={{ fontSize: "0.75rem", color: theme.colors.success, background: "rgba(16,185,129,0.1)", padding: "0.2rem 0.5rem", borderRadius: "4px", fontWeight: 600 }}>
                       Sin Duplicados
@@ -630,13 +678,16 @@ function ReportesPage() {
                                       borderRadius: "9999px",
                                       fontWeight: 600,
                                       fontSize: "0.8rem",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "0.35rem",
                                     }}
                                   >
-                                    👥 {item.cantidad_socios || item.cantidad_pagos} pago(s)
+                                    <Users size={12} /> {item.cantidad_socios || item.cantidad_pagos} pago(s)
                                   </span>
                                 </TableCell>
                                 <TableCell style={{ textAlign: "right", fontWeight: 700, color: theme.colors.success }}>
-                                  + {parseFloat(item.total_recaudado).toFixed(2)} Bs
+                                  + {parseFloat(item.total_recaudado || 0).toFixed(2)} Bs
                                 </TableCell>
                               </TableRow>
                             ))
@@ -650,8 +701,8 @@ function ReportesPage() {
                 {/* Tabla Resumen Egresos Asamblea */}
                 <div>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.75rem" }}>
-                    <h3 style={{ fontSize: "1.05rem", color: theme.colors.textMain }}>
-                      📤 2. ¿En qué se gastó? (Salidas Autorizadas)
+                    <h3 style={{ fontSize: "1.05rem", color: theme.colors.textMain, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <TrendingDown size={18} color={theme.colors.danger} /> 2. ¿En qué se gastó? (Salidas Autorizadas)
                     </h3>
                   </div>
                   <TableCard>
@@ -690,13 +741,16 @@ function ReportesPage() {
                                       borderRadius: "9999px",
                                       fontWeight: 600,
                                       fontSize: "0.8rem",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "0.35rem",
                                     }}
                                   >
-                                    📄 {item.cantidad_desembolsos}
+                                    <FileText size={12} /> {item.cantidad_desembolsos}
                                   </span>
                                 </TableCell>
                                 <TableCell style={{ textAlign: "right", fontWeight: 700, color: theme.colors.danger }}>
-                                  - {parseFloat(item.total_egresado).toFixed(2)} Bs
+                                  - {parseFloat(item.total_egresado || 0).toFixed(2)} Bs
                                 </TableCell>
                               </TableRow>
                             ))
@@ -847,14 +901,14 @@ function ReportesPage() {
                               <TableCell>
                                 <strong>{m.descripcion}</strong>
                               </TableCell>
-                              <TableCell style={{ textAlign: "right", color: m.debe > 0 ? theme.colors.danger : theme.colors.textMuted }}>
-                                {m.debe > 0 ? `+ ${m.debe.toFixed(2)}` : "-"}
+                              <TableCell style={{ textAlign: "right", color: Number(m.debe || 0) > 0 ? theme.colors.danger : theme.colors.textMuted }}>
+                                {Number(m.debe || 0) > 0 ? `+ ${Number(m.debe).toFixed(2)}` : "-"}
                               </TableCell>
-                              <TableCell style={{ textAlign: "right", color: m.haber > 0 ? theme.colors.success : theme.colors.textMuted, fontWeight: m.haber > 0 ? 700 : 400 }}>
-                                {m.haber > 0 ? `- ${m.haber.toFixed(2)}` : "-"}
+                              <TableCell style={{ textAlign: "right", color: Number(m.haber || 0) > 0 ? theme.colors.success : theme.colors.textMuted, fontWeight: Number(m.haber || 0) > 0 ? 700 : 400 }}>
+                                {Number(m.haber || 0) > 0 ? `- ${Number(m.haber).toFixed(2)}` : "-"}
                               </TableCell>
-                              <TableCell style={{ textAlign: "right", fontWeight: 800, color: m.saldo_acumulado > 0 ? theme.colors.danger : theme.colors.textMain }}>
-                                {m.saldo_acumulado.toFixed(2)} Bs
+                              <TableCell style={{ textAlign: "right", fontWeight: 800, color: Number(m.saldo_acumulado || 0) > 0 ? theme.colors.danger : theme.colors.textMain }}>
+                                {Number(m.saldo_acumulado || 0).toFixed(2)} Bs
                               </TableCell>
                             </TableRow>
                           ))

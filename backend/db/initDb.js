@@ -114,8 +114,9 @@ const initDb = async () => {
         });
       }
 
+      const adminPass = process.env.INITIAL_ADMIN_PASSWORD || 'admin123';
       const salt = await bcrypt.genSalt(10);
-      const passwordHashed = await bcrypt.hash('admin123', salt);
+      const passwordHashed = await bcrypt.hash(adminPass, salt);
 
       await Usuario.create({
         id_persona: personaAdmin.id_persona,
@@ -125,7 +126,7 @@ const initDb = async () => {
         rol: 'PRESIDENTE',
         estado: true,
       });
-      console.log('Usuario Administrador inicial creado: user="admin", pass="admin123", rol="PRESIDENTE"');
+      console.log('Usuario Administrador inicial creado con éxito.');
     }
 
     console.log('--- Base de datos inicializada y sembrada con éxito ---');

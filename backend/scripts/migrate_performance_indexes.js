@@ -31,6 +31,11 @@ async function migrateIndexes() {
       name: 'idx_cargos_asoc_periodo',
       fields: ['id_asociacion', 'periodo'],
     },
+    {
+      table: 'cargos',
+      name: 'idx_cargos_origen',
+      fields: ['tipo_origen', 'id_referencia_origen'],
+    },
 
     // 2. Ingresos
     {
@@ -52,6 +57,23 @@ async function migrateIndexes() {
       table: 'ingresos',
       name: 'idx_ingresos_asoc_estado',
       fields: ['id_asociacion', 'estado'],
+    },
+    {
+      table: 'ingresos',
+      name: 'idx_ingresos_asoc_cajero',
+      fields: ['id_asociacion', 'id_usuario'],
+    },
+
+    // 2.1 Ingresos Detalle
+    {
+      table: 'ingresos_detalle',
+      name: 'idx_ingresos_det_ingreso',
+      fields: ['id_ingreso'],
+    },
+    {
+      table: 'ingresos_detalle',
+      name: 'idx_ingresos_det_cargo',
+      fields: ['id_cargo'],
     },
 
     // 3. Socios
@@ -81,6 +103,81 @@ async function migrateIndexes() {
       table: 'consumos_luz',
       name: 'idx_consumo_socio_fecha',
       fields: ['id_socio', 'fecha_lectura'],
+    },
+
+    // 5. Personas
+    {
+      table: 'personas',
+      name: 'idx_personas_ci',
+      fields: ['ci'],
+    },
+    {
+      table: 'personas',
+      name: 'idx_personas_apellidos_nombres',
+      fields: ['apellidos', 'nombres'],
+    },
+
+    // 6. Usuarios
+    {
+      table: 'usuarios',
+      name: 'idx_usuarios_asociacion',
+      fields: ['id_asociacion'],
+    },
+    {
+      table: 'usuarios',
+      name: 'idx_usuarios_persona',
+      fields: ['id_persona'],
+    },
+
+    // 7. Conceptos y Tipos de Egreso
+    {
+      table: 'conceptos_cobro',
+      name: 'idx_conceptos_asoc_nombre',
+      fields: ['id_asociacion', 'nombre_concepto'],
+    },
+    {
+      table: 'tipos_egreso',
+      name: 'idx_tipos_egreso_asoc',
+      fields: ['id_asociacion'],
+    },
+
+    // 8. Eventos y Asistencias
+    {
+      table: 'eventos',
+      name: 'idx_eventos_asoc_fecha',
+      fields: ['id_asociacion', 'fecha'],
+    },
+    {
+      table: 'eventos',
+      name: 'idx_eventos_asoc_tipo',
+      fields: ['id_asociacion', 'tipo_evento'],
+    },
+    {
+      table: 'asistencias',
+      name: 'idx_asistencias_evento_socio',
+      fields: ['id_evento', 'id_socio'],
+    },
+    {
+      table: 'asistencias',
+      name: 'idx_asistencias_socio',
+      fields: ['id_socio'],
+    },
+
+    // 9. Aportes y Egresos
+    {
+      table: 'aportes_extraordinarios',
+      name: 'idx_aportes_asoc_estado',
+      fields: ['id_asociacion', 'estado'],
+    },
+    {
+      table: 'egresos',
+      name: 'idx_egresos_asoc_fecha',
+      fields: ['id_asociacion', 'fecha_gasto'],
+    },
+    {
+      table: 'egresos',
+      name: 'idx_egresos_tipo',
+      fields: ['id_tipo_egreso'],
     },
   ];
 

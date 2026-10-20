@@ -1,7 +1,7 @@
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { Op } = require('sequelize');
-const { Usuario, Persona, Asociacion } = require('../models');
+const { Usuario, Persona, Asociacion, sequelize } = require('../models');
 const { generateJWT } = require('../helpers/token');
 
 /**
@@ -162,7 +162,11 @@ const olvidePassword = async (req, res, next) => {
     });
 
     // Simulación de envío por Email / WhatsApp Gremial
-    console.log(`[RECUPERACIÓN SEGURA] Token emitido para ${usuario.username}: ${tokenRecuperacion} (Válido hasta: ${expiracionToken.toISOString()})`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[RECUPERACIÓN SEGURA] Token emitido para ${usuario.username}: ${tokenRecuperacion} (Válido hasta: ${expiracionToken.toISOString()})`);
+    } else {
+      console.log(`[RECUPERACIÓN SEGURA] Token de recuperación emitido para el usuario ID: ${usuario.id_usuario}`);
+    }
 
     return res.status(200).json({
       mensaje: 'Instrucciones y enlace de recuperación generados exitosamente. Válido por 1 hora.',
@@ -270,14 +274,24 @@ const getMe = async (req, res, next) => {
  * register: crear una nueva persona + usuario
  */
 const register = async (req, res, next) => {
+  const t = await sequelize.transaction();
   try {
     const {
       nombres, apellidos, domicilio, telefono, ci,
       username, password, rol, id_asociacion,
     } = req.body;
 
-    const usuarioExistente = await Usuario.findOne({ where: { username, deleted_at: null } });
+    // Aislamiento Multi-tenant estricto: administradores de asociación solo pueden crear usuarios en su asociación
+    const targetAsocId = (req.user && req.user.rol === 'SUPERADMIN_SAAS')
+      ? (id_asociacion || req.user.id_asociacion)
+      : (req.user ? req.user.id_asociacion : id_asociacion);
+
+    const usuarioExistente = await Usuario.findOne({
+      where: { username, deleted_at: null },
+      transaction: t,
+    });
     if (usuarioExistente) {
+      await t.rollback();
       return res.status(400).json({ mensaje: 'El username ya está en uso.' });
     }
 
@@ -289,14 +303,14 @@ const register = async (req, res, next) => {
       ci,
       created_at: new Date(),
       updated_at: new Date(),
-    });
+    }, { transaction: t });
 
     const salt = await bcrypt.genSalt(10);
     const passwordHash = await bcrypt.hash(password, salt);
 
     const usuario = await Usuario.create({
       id_persona: persona.id_persona,
-      id_asociacion,
+      id_asociacion: targetAsocId,
       username,
       password: passwordHash,
       rol,
@@ -305,7 +319,9 @@ const register = async (req, res, next) => {
       bloqueado_hasta: null,
       created_at: new Date(),
       updated_at: new Date(),
-    });
+    }, { transaction: t });
+
+    await t.commit();
 
     return res.status(201).json({
       mensaje: 'Usuario registrado exitosamente.',
@@ -318,6 +334,7 @@ const register = async (req, res, next) => {
       },
     });
   } catch (error) {
+    await t.rollback();
     next(error);
   }
 };

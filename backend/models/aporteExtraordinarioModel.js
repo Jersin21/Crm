@@ -68,6 +68,12 @@ const AporteExtraordinario = sequelize.define('aporte_extraordinario', {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   deletedAt: 'deleted_at',
+  indexes: [
+    {
+      name: 'idx_aportes_asoc_estado',
+      fields: ['id_asociacion', 'estado'],
+    },
+  ],
 });
 
 module.exports = AporteExtraordinario;

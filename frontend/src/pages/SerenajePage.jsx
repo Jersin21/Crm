@@ -3,6 +3,7 @@ import styled from "styled-components";
 import axios from "axios";
 import { toast } from "react-toastify";
 import { PDFDownloadLink } from "@react-pdf/renderer";
+import { Zap, Users, FileText, Eye, Shield, CheckCircle2, Printer, DollarSign } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
@@ -27,11 +28,8 @@ import {
   StatusBadge,
 } from "../styles/commonStyles";
 import { sociosRoute, cargosRoute, ingresosRoute, serenajeRoute } from "../utils/APIroutes";
-import { formatDate } from "../utils/dateUtils";
 import Modal from "../components/Modal";
 import ReciboPagoPDF from "../components/ReciboPagoPDF";
-
-const MONTO_SERENAJE_MENSUAL = 20.0;
 
 const MetricGrid = styled.div`
   display: grid;
@@ -93,7 +91,7 @@ const Label = styled.label`
 const Input = styled.input`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -102,8 +100,15 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  display: block;
+  margin-top: 0.25rem;
 `;
 
 function SerenajePage() {
@@ -119,6 +124,7 @@ function SerenajePage() {
   const hoy = new Date();
   const mesActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, "0")}`;
   const [periodoGenerar, setPeriodoGenerar] = useState(mesActual);
+  const [periodoError, setPeriodoError] = useState("");
   const [generando, setGenerando] = useState(false);
 
   // Modal detalle de cobro y meses de serenaje
@@ -137,21 +143,29 @@ function SerenajePage() {
         axios.get(cargosRoute, auth.config),
       ]);
 
-      const listaSocios = Array.isArray(resSocios.data) ? resSocios.data : resSocios.data.socios || [];
-      const listaCargos = Array.isArray(resCargos.data) ? resCargos.data : resCargos.data.cargos || [];
+      const listaSocios = Array.isArray(resSocios.data)
+        ? resSocios.data
+        : resSocios.data.socios || [];
+      const listaCargos = Array.isArray(resCargos.data)
+        ? resCargos.data
+        : resCargos.data.cargos || [];
 
       // Filtrar solo cargos correspondientes a Serenaje
       const soloSerenaje = listaCargos.filter(
         (c) =>
           c.tipo_origen === "serenaje" ||
-          (c.concepto?.nombre_concepto || c.ConceptoCobro?.nombre_concepto || "").toLowerCase().includes("serenaje")
+          (c.concepto?.nombre_concepto || c.ConceptoCobro?.nombre_concepto || "")
+            .toLowerCase()
+            .includes("serenaje")
       );
 
       setSocios(listaSocios);
       setCargosSerenaje(soloSerenaje);
     } catch (err) {
-      console.error(err);
-      toast.error("Error al cargar datos del módulo Serenaje", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar datos del módulo Serenaje",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -164,20 +178,25 @@ function SerenajePage() {
   // Generar cargos masivos de Serenaje
   const handleGenerarMes = async (e) => {
     e.preventDefault();
-    if (!periodoGenerar) {
-      toast.error("Ingresa el periodo (YYYY-MM)", toastOptions);
+    const periodoLimpio = (periodoGenerar || "").trim();
+    const regexPeriodo = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+    if (!regexPeriodo.test(periodoLimpio)) {
+      setPeriodoError("El formato del período debe ser AAAA-MM (ej. 2026-10)");
+      toast.error("El formato del período debe ser AAAA-MM (ej. 2026-10)", toastOptions);
       return;
     }
+    setPeriodoError("");
 
     try {
       setGenerando(true);
       const { data } = await axios.post(
         serenajeRoute,
-        { periodo: periodoGenerar },
+        { periodo: periodoLimpio },
         auth.config
       );
       toast.success(
-        data.mensaje || `Serenaje generado para el periodo ${periodoGenerar}`,
+        data.mensaje || `Serenaje generado para el periodo ${periodoLimpio}`,
         toastOptions
       );
       setModalGenerar(false);
@@ -216,8 +235,10 @@ function SerenajePage() {
   const calcularTotalACobrar = () => {
     return mesesAdeudados.reduce((acc, c) => {
       if (mesesSeleccionados[c.id_cargo]) {
-        const subtotal = parseFloat(c.saldo_capital_pendiente || 0) + parseFloat(c.monto_mora_acumulada || 0);
-        return acc + subtotal;
+        const subtotal =
+          parseFloat(c.saldo_capital_pendiente || 0) +
+          parseFloat(c.monto_mora_acumulada || 0);
+        return acc + (isNaN(subtotal) ? 0 : subtotal);
       }
       return acc;
     }, 0);
@@ -272,7 +293,12 @@ function SerenajePage() {
     );
 
     const totalDeuda = pendientes.reduce(
-      (acc, c) => acc + parseFloat(c.saldo_capital_pendiente || 0) + parseFloat(c.monto_mora_acumulada || 0),
+      (acc, c) => {
+        const val =
+          parseFloat(c.saldo_capital_pendiente || 0) +
+          parseFloat(c.monto_mora_acumulada || 0);
+        return acc + (isNaN(val) ? 0 : val);
+      },
       0
     );
 
@@ -287,7 +313,7 @@ function SerenajePage() {
   const sociosFiltrados = sociosConSerenaje.filter((s) => {
     const nom = `${s.persona.nombres || ""} ${s.persona.apellidos || ""}`.toLowerCase();
     const cas = String(s.nro_caseta || "").toLowerCase();
-    const q = busqueda.toLowerCase();
+    const q = busqueda.trim().toLowerCase();
     return nom.includes(q) || cas.includes(q);
   });
 
@@ -296,11 +322,14 @@ function SerenajePage() {
     const p = soc.persona || soc.Persona || {};
     const nom = `${p.nombres || ""} ${p.apellidos || ""}`.toLowerCase();
     const cas = String(soc.nro_caseta || "").toLowerCase();
-    const q = busqueda.toLowerCase();
+    const q = busqueda.trim().toLowerCase();
     return nom.includes(q) || cas.includes(q) || (c.periodo || "").includes(q);
   });
 
-  const totalDeudaGeneral = sociosConSerenaje.reduce((acc, s) => acc + s.totalDeudaSerenaje, 0);
+  const totalDeudaGeneral = sociosConSerenaje.reduce(
+    (acc, s) => acc + (s.totalDeudaSerenaje || 0),
+    0
+  );
   const totalSociosConDeuda = sociosConSerenaje.filter((s) => s.mesesPendientesCount > 0).length;
 
   return (
@@ -313,8 +342,8 @@ function SerenajePage() {
             <p>Cuota fija mensual de 20.00 Bs por socio | Acumulación por meses adeudados</p>
           </div>
           <div className="actions">
-            <CreateButton onClick={() => setModalGenerar(true)}>
-              ⚡ Generar Serenaje del Mes
+            <CreateButton onClick={() => { setModalGenerar(true); setPeriodoError(""); }}>
+              <Zap size={16} /> Generar Serenaje del Mes
             </CreateButton>
           </div>
         </SectionHeader>
@@ -326,7 +355,9 @@ function SerenajePage() {
           </MetricCard>
           <MetricCard>
             <span className="label">Total Cartera por Cobrar</span>
-            <h2 style={{ color: theme.colors.danger }}>{totalDeudaGeneral.toFixed(2)} Bs</h2>
+            <h2 style={{ color: theme.colors.danger }}>
+              {(totalDeudaGeneral || 0).toFixed(2)} Bs
+            </h2>
           </MetricCard>
           <MetricCard>
             <span className="label">Socios con Meses Pendientes</span>
@@ -336,10 +367,12 @@ function SerenajePage() {
 
         <ViewToggleBar>
           <TabBtn $active={vista === "socios"} onClick={() => setVista("socios")}>
-            👥 Padrón de Socios y Deuda Acumulada
+            <Users size={16} style={{ verticalAlign: "middle", marginRight: "0.5rem" }} />
+            Padrón de Socios y Deuda Acumulada
           </TabBtn>
           <TabBtn $active={vista === "historial"} onClick={() => setVista("historial")}>
-            📑 Historial de Cargos de Serenaje
+            <FileText size={16} style={{ verticalAlign: "middle", marginRight: "0.5rem" }} />
+            Historial de Cargos de Serenaje
           </TabBtn>
         </ViewToggleBar>
 
@@ -398,7 +431,7 @@ function SerenajePage() {
                               {s.mesesPendientesCount} {s.mesesPendientesCount === 1 ? "mes" : "meses"} pendiente(s)
                             </StatusBadge>
                           ) : (
-                            <StatusBadge $status="Activo">Al día ✅</StatusBadge>
+                            <StatusBadge $status="Activo">Al día</StatusBadge>
                           )}
                         </TableCell>
                         <TableCell
@@ -408,11 +441,11 @@ function SerenajePage() {
                             color: s.totalDeudaSerenaje > 0 ? theme.colors.danger : theme.colors.success,
                           }}
                         >
-                          {s.totalDeudaSerenaje.toFixed(2)} Bs
+                          {(s.totalDeudaSerenaje || 0).toFixed(2)} Bs
                         </TableCell>
                         <TableCell>
                           <ViewButton onClick={() => abrirDetalleCobro(s)}>
-                            👁️ Ver Meses / Cobrar
+                            <Eye size={14} /> Ver Meses / Cobrar
                           </ViewButton>
                         </TableCell>
                       </TableRow>
@@ -459,19 +492,21 @@ function SerenajePage() {
                     cargosFiltrados.map((c) => {
                       const soc = c.socio || c.Socio || {};
                       const p = soc.persona || soc.Persona || {};
-                      const total = parseFloat(c.saldo_capital_pendiente || 0) + parseFloat(c.monto_mora_acumulada || 0);
+                      const total =
+                        parseFloat(c.saldo_capital_pendiente || 0) +
+                        parseFloat(c.monto_mora_acumulada || 0);
                       return (
                         <TableRow key={c.id_cargo}>
                           <TableCell><strong>Caseta #{soc.nro_caseta || "-"}</strong></TableCell>
-                          <TableCell>{p.nombres} {p.apellidos}</TableCell>
-                          <TableCell>{c.periodo}</TableCell>
-                          <TableCell>{c.detalle}</TableCell>
-                          <TableCell>{parseFloat(c.saldo_capital_pendiente).toFixed(2)} Bs</TableCell>
-                          <TableCell style={{ color: parseFloat(c.monto_mora_acumulada) > 0 ? theme.colors.danger : theme.colors.textMuted }}>
+                          <TableCell>{p.nombres || ""} {p.apellidos || ""}</TableCell>
+                          <TableCell>{c.periodo || "-"}</TableCell>
+                          <TableCell>{c.detalle || "-"}</TableCell>
+                          <TableCell>{parseFloat(c.saldo_capital_pendiente || 0).toFixed(2)} Bs</TableCell>
+                          <TableCell style={{ color: parseFloat(c.monto_mora_acumulada || 0) > 0 ? theme.colors.danger : theme.colors.textMuted }}>
                             {parseFloat(c.monto_mora_acumulada || 0).toFixed(2)} Bs
                           </TableCell>
                           <TableCell style={{ fontWeight: 800, color: theme.colors.warning }}>
-                            {total.toFixed(2)} Bs
+                            {(isNaN(total) ? 0 : total).toFixed(2)} Bs
                           </TableCell>
                           <TableCell>
                             <StatusBadge $status={c.estado}>{c.estado}</StatusBadge>
@@ -495,9 +530,10 @@ function SerenajePage() {
         maxWidth="500px"
       >
         <form onSubmit={handleGenerarMes}>
-          <div style={{ padding: "0.75rem", background: "rgba(14, 165, 233, 0.08)", borderRadius: theme.radius.md, marginBottom: "1.25rem", border: `1px solid rgba(14, 165, 233, 0.2)` }}>
+          <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-start", padding: "0.75rem", background: "rgba(14, 165, 233, 0.08)", borderRadius: theme.radius.md, marginBottom: "1.25rem", border: `1px solid rgba(14, 165, 233, 0.2)` }}>
+            <Shield size={20} color={theme.colors.primary} style={{ flexShrink: 0, marginTop: "2px" }} />
             <p style={{ fontSize: "0.85rem", color: theme.colors.textMain, margin: 0 }}>
-              🛡️ Esta acción generará el cargo fijo de <strong>20.00 Bs</strong> por concepto de Serenaje y Seguridad a <strong>todos los socios activos</strong> para el mes indicado.
+              Esta acción generará el cargo fijo de <strong>20.00 Bs</strong> por concepto de Serenaje y Seguridad a <strong>todos los socios activos</strong> para el mes indicado.
             </p>
           </div>
           <FormGroup>
@@ -506,9 +542,14 @@ function SerenajePage() {
               type="text"
               placeholder="Ej. 2026-10"
               value={periodoGenerar}
-              onChange={(e) => setPeriodoGenerar(e.target.value)}
+              $hasError={!!periodoError}
+              onChange={(e) => {
+                setPeriodoGenerar(e.target.value);
+                if (periodoError) setPeriodoError("");
+              }}
               required
             />
+            {periodoError && <ErrorText>{periodoError}</ErrorText>}
           </FormGroup>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "1.5rem" }}>
             <button
@@ -526,7 +567,7 @@ function SerenajePage() {
               Cancelar
             </button>
             <CreateButton type="submit" disabled={generando}>
-              {generando ? "Generando..." : "⚡ Confirmar y Generar Cargos"}
+              <Zap size={16} /> {generando ? "Generando..." : "Confirmar y Generar Cargos"}
             </CreateButton>
           </div>
         </form>
@@ -555,15 +596,17 @@ function SerenajePage() {
             </h4>
 
             {mesesAdeudados.length === 0 ? (
-              <div style={{ padding: "1.5rem", textAlign: "center", background: "rgba(16, 185, 129, 0.1)", color: theme.colors.success, borderRadius: theme.radius.md }}>
-                🎉 Este socio no tiene meses pendientes de Serenaje. ¡Está al día!
+              <div style={{ padding: "1.5rem", textAlign: "center", background: "rgba(16, 185, 129, 0.1)", color: theme.colors.success, borderRadius: theme.radius.md, display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem" }}>
+                <CheckCircle2 size={18} /> Este socio no tiene meses pendientes de Serenaje. ¡Está al día!
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", maxHeight: "280px", overflowY: "auto", marginBottom: "1rem" }}>
                 {mesesAdeudados.map((c) => {
                   const id = c.id_cargo;
                   const isChecked = !!mesesSeleccionados[id];
-                  const subtotal = parseFloat(c.saldo_capital_pendiente || 0) + parseFloat(c.monto_mora_acumulada || 0);
+                  const subtotal =
+                    parseFloat(c.saldo_capital_pendiente || 0) +
+                    parseFloat(c.monto_mora_acumulada || 0);
                   return (
                     <div
                       key={id}
@@ -593,12 +636,12 @@ function SerenajePage() {
                             Período: {c.periodo || "-"}
                           </div>
                           <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
-                            {c.detalle} | Cuota: {parseFloat(c.saldo_capital_pendiente).toFixed(2)} Bs | Mora: {parseFloat(c.monto_mora_acumulada || 0).toFixed(2)} Bs
+                            {c.detalle} | Cuota: {parseFloat(c.saldo_capital_pendiente || 0).toFixed(2)} Bs | Mora: {parseFloat(c.monto_mora_acumulada || 0).toFixed(2)} Bs
                           </div>
                         </div>
                       </label>
                       <div style={{ fontWeight: 800, color: theme.colors.warning, fontSize: "1rem" }}>
-                        {subtotal.toFixed(2)} Bs
+                        {(isNaN(subtotal) ? 0 : subtotal).toFixed(2)} Bs
                       </div>
                     </div>
                   );
@@ -638,8 +681,8 @@ function SerenajePage() {
                 }}
               >
                 <div>
-                  <strong style={{ color: theme.colors.success }}>
-                    ✅ Recibo N° {String(reciboEmitido.id_ingreso).padStart(5, "0")} Emitido
+                  <strong style={{ color: theme.colors.success, display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                    <CheckCircle2 size={16} /> Recibo N° {String(reciboEmitido.id_ingreso).padStart(5, "0")} Emitido
                   </strong>
                   <p style={{ margin: "0.2rem 0 0", fontSize: "0.8rem", color: theme.colors.textMuted }}>
                     Pago registrado correctamente en el libro de caja
@@ -652,7 +695,7 @@ function SerenajePage() {
                 >
                   {({ loading: pdfLoading }) => (
                     <ActionButton $variant="success">
-                      {pdfLoading ? "Preparando..." : "🖨️ Descargar Recibo Oficial (PDF)"}
+                      <Printer size={16} /> {pdfLoading ? "Preparando..." : "Descargar Recibo Oficial (PDF)"}
                     </ActionButton>
                   )}
                 </PDFDownloadLink>
@@ -678,7 +721,7 @@ function SerenajePage() {
                 onClick={handleCobrarSerenaje}
                 disabled={guardandoCobro || calcularTotalACobrar() === 0}
               >
-                {guardandoCobro ? "Procesando..." : "💰 Confirmar Cobro y Emitir Recibo"}
+                <DollarSign size={16} /> {guardandoCobro ? "Procesando..." : "Confirmar Cobro y Emitir Recibo"}
               </CreateButton>
             </div>
           </div>

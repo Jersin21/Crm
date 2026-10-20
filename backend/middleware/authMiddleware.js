@@ -1,6 +1,6 @@
-const jwt = require('jsonwebtoken');
 const { Usuario, Persona, Asociacion } = require('../models');
 const { requireRole, checkRole } = require('./roleMiddleware');
+const { verifyJWT } = require('../helpers/token');
 require('dotenv').config();
 
 /**
@@ -16,7 +16,7 @@ const authMiddleware = async (req, res, next) => {
     }
 
     const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'mercado_crm_secret_2024');
+    const decoded = verifyJWT(token);
 
     // Buscar usuario en base de datos con su persona y asociación
     const usuario = await Usuario.findOne({

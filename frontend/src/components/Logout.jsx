@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { LogOut } from "lucide-react";
 import useAuth from "../hooks/authHooks";
 import styled from "styled-components";
 import theme from "../styles/theme";
@@ -38,7 +39,7 @@ function Logout() {
 
   return (
     <StyledLogoutButton onClick={handleLogout}>
-      <span>🚪</span>
+      <LogOut size={16} />
       <span>Cerrar Sesión</span>
     </StyledLogoutButton>
   );

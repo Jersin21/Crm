@@ -43,40 +43,40 @@ async function limpiarDatosEstres() {
 
     // 1. Eliminar IngresoDetalle vinculado a cargos o ingresos marcados
     await sequelize.query(
-      `DELETE d FROM ingresos_detalle d INNER JOIN cargos c ON d.id_cargo = c.id_cargo WHERE c.detalle LIKE '${TAG_STRESS}%'`,
-      { transaction: t }
+      'DELETE d FROM ingresos_detalle d INNER JOIN cargos c ON d.id_cargo = c.id_cargo WHERE c.detalle LIKE :tag',
+      { replacements: { tag: `${TAG_STRESS}%` }, transaction: t }
     );
     await sequelize.query(
-      `DELETE d FROM ingresos_detalle d INNER JOIN ingresos i ON d.id_ingreso = i.id_ingreso WHERE i.observacion LIKE '${TAG_STRESS}%'`,
-      { transaction: t }
+      'DELETE d FROM ingresos_detalle d INNER JOIN ingresos i ON d.id_ingreso = i.id_ingreso WHERE i.observacion LIKE :tag',
+      { replacements: { tag: `${TAG_STRESS}%` }, transaction: t }
     );
     console.log('   ✅ Detalles de ingreso eliminados.');
 
     // 2. Eliminar Ingresos
     await sequelize.query(
-      `DELETE FROM ingresos WHERE observacion LIKE '${TAG_STRESS}%'`,
-      { transaction: t }
+      'DELETE FROM ingresos WHERE observacion LIKE :tag',
+      { replacements: { tag: `${TAG_STRESS}%` }, transaction: t }
     );
     console.log('   ✅ Ingresos de estrés eliminados.');
 
     // 3. Eliminar Cargos
     await sequelize.query(
-      `DELETE FROM cargos WHERE detalle LIKE '${TAG_STRESS}%'`,
-      { transaction: t }
+      'DELETE FROM cargos WHERE detalle LIKE :tag',
+      { replacements: { tag: `${TAG_STRESS}%` }, transaction: t }
     );
     console.log('   ✅ Cargos de estrés eliminados.');
 
     // 4. Eliminar Socios creados por estrés
     await sequelize.query(
-      `DELETE s FROM socios s INNER JOIN personas p ON s.id_persona = p.id_persona WHERE p.domicilio = '${DOMICILIO_TAG}'`,
-      { transaction: t }
+      'DELETE s FROM socios s INNER JOIN personas p ON s.id_persona = p.id_persona WHERE p.domicilio = :domicilio',
+      { replacements: { domicilio: DOMICILIO_TAG }, transaction: t }
     );
     console.log('   ✅ Socios de estrés eliminados.');
 
     // 5. Eliminar Personas creadas por estrés
     await sequelize.query(
-      `DELETE FROM personas WHERE domicilio = '${DOMICILIO_TAG}'`,
-      { transaction: t }
+      'DELETE FROM personas WHERE domicilio = :domicilio',
+      { replacements: { domicilio: DOMICILIO_TAG }, transaction: t }
     );
     console.log('   ✅ Personas de estrés eliminadas.');
 
@@ -313,9 +313,18 @@ async function ejecutarSeedEstres() {
 }
 
 // ─── CONTROL DE EJECUCIÓN (CLI) ──────────────────────────────────────────────
-const args = process.argv.slice(2);
-if (args.includes('--clean') || args.includes('-c') || args.includes('--purge')) {
-  limpiarDatosEstres().then(() => process.exit(0)).catch(() => process.exit(1));
-} else {
-  ejecutarSeedEstres().then(() => process.exit(0)).catch(() => process.exit(1));
+if (require.main === module) {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_STRESS_SEED !== 'true') {
+    console.error('⛔ SEGURIDAD: seed-stress está deshabilitado en producción sin ALLOW_STRESS_SEED=true');
+    process.exit(1);
+  }
+
+  const args = process.argv.slice(2);
+  if (args.includes('--clean') || args.includes('-c') || args.includes('--purge')) {
+    limpiarDatosEstres().then(() => process.exit(0)).catch(() => process.exit(1));
+  } else {
+    ejecutarSeedEstres().then(() => process.exit(0)).catch(() => process.exit(1));
+  }
 }
+
+module.exports = { ejecutarSeedEstres, limpiarDatosEstres };

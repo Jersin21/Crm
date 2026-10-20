@@ -924,4 +924,8 @@ async function runTestSuite() {
   }
 }
 
-runTestSuite();
+if (require.main === module) {
+  runTestSuite();
+}
+
+module.exports = { runTestSuite };

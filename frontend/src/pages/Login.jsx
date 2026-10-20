@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import styled from "styled-components";
-import { Flip, ToastContainer, toast } from "react-toastify";
+import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import axios from "axios";
 import { loginRoute } from "../utils/APIroutes";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
 import theme from "../styles/theme";
+import LogoImg from "../assets/logo.svg";
 
 // ─── Estilos de la página de Login ───────────────────────────────────────────
 
@@ -44,10 +45,10 @@ const BrandSection = styled.div`
   text-align: center;
   margin-bottom: 2rem;
 
-  .brand-icon {
-    font-size: 3.5rem;
+  .brand-logo {
+    height: 4.5rem;
     margin-bottom: 0.75rem;
-    filter: drop-shadow(0 0 16px rgba(14, 165, 233, 0.4));
+    filter: drop-shadow(0 4px 14px rgba(14, 165, 233, 0.45));
   }
 
   h1 {
@@ -89,7 +90,7 @@ const Label = styled.label`
 const Input = styled.input`
   width: 100%;
   padding: 0.875rem 1rem;
-  border: 1px solid ${theme.colors.borderDark};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.borderDark)};
   border-radius: ${theme.borderRadius.sm};
   background-color: ${theme.colors.bgInput};
   color: ${theme.colors.textLight};
@@ -99,14 +100,21 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.2);
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    box-shadow: 0 0 0 3px ${({ $hasError }) => ($hasError ? "rgba(239, 68, 68, 0.25)" : "rgba(14, 165, 233, 0.2)")};
   }
 
   &::placeholder {
     color: ${theme.colors.textMuted};
     opacity: 0.5;
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
 `;
 
 const SubmitButton = styled.button`
@@ -141,6 +149,7 @@ function Login() {
   const navigate = useNavigate();
   const { auth, loginUser } = useAuth();
   const [values, setValues] = useState({ username: "", password: "" });
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
 
   // Si ya está autenticado, redirige al inicio
@@ -150,15 +159,36 @@ function Login() {
     }
   }, [auth, navigate]);
 
+  const validate = () => {
+    const errs = {};
+    if (!values.username || !values.username.trim()) {
+      errs.username = "El nombre de usuario es obligatorio.";
+    } else if (values.username.trim().length < 3) {
+      errs.username = "El usuario debe tener al menos 3 caracteres.";
+    }
+
+    if (!values.password || !values.password.trim()) {
+      errs.password = "La contraseña es obligatoria.";
+    } else if (values.password.length < 4) {
+      errs.password = "La contraseña debe tener al menos 4 caracteres.";
+    }
+
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!handleValidation()) return;
+    if (!validate()) {
+      toast.error("Por favor corrija los campos requeridos.", toastOptions);
+      return;
+    }
 
     const { username, password } = values;
     try {
       setLoading(true);
-      const { data } = await axios.post(loginRoute, { username, password });
+      const { data } = await axios.post(loginRoute, { username: username.trim(), password });
 
       if (data.status === false) {
         toast.error(data.msg, toastOptions);
@@ -166,45 +196,37 @@ function Login() {
       }
 
       if (data.status === true) {
-        // El backend devuelve { status, user: { access_token, user: {...datos} } }
         loginUser(data.user.access_token, data.user.user);
         navigate("/");
       }
     } catch (err) {
-      toast.error(
-        err.response?.data?.msg || "Error al iniciar sesión",
-        toastOptions
-      );
+      const msg = err.response?.data?.mensaje || err.response?.data?.msg || "Error al iniciar sesión";
+      toast.error(msg, toastOptions);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleValidation = () => {
-    const { username, password } = values;
-    if (!username.trim() || !password.trim()) {
-      toast.error("Por favor, completa todos los campos", toastOptions);
-      return false;
-    }
-    return true;
-  };
-
   const handleChange = (e) => {
-    setValues({ ...values, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setValues((prev) => ({ ...prev, [name]: value }));
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: "" }));
+    }
   };
 
   return (
     <Container>
       <LoginCard>
         <BrandSection>
-          <span className="brand-icon">🏪</span>
+          <img src={LogoImg} alt="MiSocios" className="brand-logo" />
           <h1>MiSocios</h1>
           <p>Sistema de Gestión de Asociaciones y Mercados</p>
         </BrandSection>
 
-        <Form onSubmit={handleSubmit}>
+        <Form onSubmit={handleSubmit} noValidate>
           <FormGroup>
-            <Label htmlFor="username">Usuario</Label>
+            <Label htmlFor="username">Usuario *</Label>
             <Input
               id="username"
               type="text"
@@ -212,12 +234,14 @@ function Login() {
               name="username"
               value={values.username}
               onChange={handleChange}
+              $hasError={Boolean(errors.username)}
               autoComplete="username"
             />
+            {errors.username && <ErrorText>{errors.username}</ErrorText>}
           </FormGroup>
 
           <FormGroup>
-            <Label htmlFor="password">Contraseña</Label>
+            <Label htmlFor="password">Contraseña *</Label>
             <Input
               id="password"
               type="password"
@@ -225,8 +249,10 @@ function Login() {
               name="password"
               value={values.password}
               onChange={handleChange}
+              $hasError={Boolean(errors.password)}
               autoComplete="current-password"
             />
+            {errors.password && <ErrorText>{errors.password}</ErrorText>}
           </FormGroup>
 
           <SubmitButton type="submit" disabled={loading}>
@@ -234,9 +260,9 @@ function Login() {
           </SubmitButton>
         </Form>
       </LoginCard>
-      <ToastContainer transition={Flip} />
     </Container>
   );
 }
 
 export default Login;
+

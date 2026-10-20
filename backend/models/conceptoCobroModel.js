@@ -52,6 +52,12 @@ const ConceptoCobro = sequelize.define('concepto_cobro', {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   deletedAt: 'deleted_at',
+  indexes: [
+    {
+      name: 'idx_conceptos_asoc_nombre',
+      fields: ['id_asociacion', 'nombre_concepto'],
+    },
+  ],
 });
 
 module.exports = ConceptoCobro;

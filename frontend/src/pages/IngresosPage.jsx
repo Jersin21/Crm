@@ -4,6 +4,20 @@ import axios from "axios";
 import { toast } from "react-toastify";
 import { Link } from "react-router-dom";
 import { PDFDownloadLink } from "@react-pdf/renderer";
+import {
+  CreditCard,
+  Plus,
+  Tag,
+  UserCheck,
+  Building,
+  Zap,
+  Globe,
+  Printer,
+  Calculator,
+  UserPlus,
+  Info,
+  CheckCircle,
+} from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import useAuth from "../hooks/authHooks";
 import useDebounce from "../hooks/useDebounce";
@@ -37,7 +51,7 @@ import {
   ingresoDirectoRoute,
   cargosResumenSociosRoute,
 } from "../utils/APIroutes";
-import { formatDateTime, formatDate } from "../utils/dateUtils";
+import { formatDateTime } from "../utils/dateUtils";
 
 // ─── Estilos Personalizados ──────────────────────────────────────────────────
 
@@ -88,13 +102,18 @@ const Label = styled.label`
 const Select = styled.select`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
   width: 100%;
   box-sizing: border-box;
   cursor: pointer;
+
+  &:focus {
+    outline: none;
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+  }
 
   option {
     background-color: ${theme.colors.bgCard};
@@ -104,7 +123,7 @@ const Select = styled.select`
 const Input = styled.input`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -113,8 +132,16 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    box-shadow: 0 0 0 2px ${({ $hasError }) => ($hasError ? "rgba(239, 68, 68, 0.2)" : "rgba(14, 165, 233, 0.2)")};
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
 `;
 
 const Textarea = styled.textarea`
@@ -193,6 +220,17 @@ const estadoInicialDirecto = {
   nuevo_socio_domicilio: "",
 };
 
+const confirmModalInitial = {
+  isOpen: false,
+  title: "",
+  message: "",
+  confirmText: "Confirmar",
+  requireReason: false,
+  reasonPlaceholder: "",
+  onConfirm: null,
+  loading: false,
+};
+
 function IngresosPage() {
   const { auth } = useAuth();
 
@@ -200,30 +238,21 @@ function IngresosPage() {
   const [socios, setSocios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
-  // Modo Tostadora: debounce de 300ms para evitar saturación de CPU al escribir
   const debouncedBusqueda = useDebounce(busqueda, 300);
-  const [filtroTipo, setFiltroTipo] = useState("todos"); // "todos" | "traspaso" | "afiliacion" | "alquiler" | "directo" | "cargos"
-  const [filtroEstado, setFiltroEstado] = useState("todos"); // "todos" | "Valido" | "Anulado"
+  const [filtroTipo, setFiltroTipo] = useState("todos");
+  const [filtroEstado, setFiltroEstado] = useState("todos");
 
   // Modales
   const [modalDirectoAbierto, setModalDirectoAbierto] = useState(false);
   const [guardandoDirecto, setGuardandoDirecto] = useState(false);
   const [formDirecto, setFormDirecto] = useState(estadoInicialDirecto);
+  const [directoErrors, setDirectoErrors] = useState({});
 
   const [reciboGenerado, setReciboGenerado] = useState(null);
   const [modalReciboExito, setModalReciboExito] = useState(false);
 
   // Modal de confirmación para anulación
-  const [confirmModalData, setConfirmModalData] = useState({
-    isOpen: false,
-    title: "",
-    message: "",
-    confirmText: "Confirmar",
-    requireReason: false,
-    reasonPlaceholder: "",
-    onConfirm: null,
-    loading: false,
-  });
+  const [confirmModalData, setConfirmModalData] = useState(confirmModalInitial);
 
   // Cargar datos
   const fetchDatos = async () => {
@@ -242,8 +271,10 @@ function IngresosPage() {
       setIngresos(listaIngresos);
       setSocios(listaSocios);
     } catch (err) {
-      console.error(err);
-      toast.error("Error al cargar los registros de ingresos", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar los registros de ingresos",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -265,19 +296,21 @@ function IngresosPage() {
     ingresos.forEach((item) => {
       if (item.estado === "Valido") {
         const m = parseFloat(item.monto_total_recibido || 0);
-        totalGeneral += m;
+        if (!isNaN(m)) {
+          totalGeneral += m;
 
-        const origen = (item.tipo_origen || "").toLowerCase();
-        const concepto = (item.concepto || "").toLowerCase();
+          const origen = (item.tipo_origen || "").toLowerCase();
+          const concepto = (item.concepto || "").toLowerCase();
 
-        if (origen === "traspaso" || concepto.includes("traspaso")) {
-          totalTraspasos += m;
-          cantidadTraspasos++;
-        } else if (origen === "afiliacion" || concepto.includes("afilia")) {
-          totalAfiliaciones += m;
-          cantidadAfiliaciones++;
-        } else if (origen !== "cargos") {
-          totalOtros += m;
+          if (origen === "traspaso" || concepto.includes("traspaso")) {
+            totalTraspasos += m;
+            cantidadTraspasos++;
+          } else if (origen === "afiliacion" || concepto.includes("afilia")) {
+            totalAfiliaciones += m;
+            cantidadAfiliaciones++;
+          } else if (origen !== "cargos") {
+            totalOtros += m;
+          }
         }
       }
     });
@@ -298,10 +331,14 @@ function IngresosPage() {
       ...estadoInicialDirecto,
       fecha_pago: new Date().toISOString().split("T")[0],
     });
+    setDirectoErrors({});
     setModalDirectoAbierto(true);
   };
 
   const handleDirectoChange = (campo, valor) => {
+    if (directoErrors[campo]) {
+      setDirectoErrors((prev) => ({ ...prev, [campo]: "" }));
+    }
     setFormDirecto((prev) => {
       const nuevo = { ...prev, [campo]: valor };
 
@@ -367,17 +404,71 @@ function IngresosPage() {
     });
   };
 
+  const validateDirecto = () => {
+    const errs = {};
+    const montoNum = parseFloat(formDirecto.monto);
+    if (!formDirecto.monto || isNaN(montoNum) || montoNum <= 0) {
+      errs.monto = "El monto debe ser un valor numérico mayor a 0 Bs.";
+    }
+    if (!formDirecto.concepto || !formDirecto.concepto.trim()) {
+      errs.concepto = "El concepto del ingreso es obligatorio.";
+    } else if (formDirecto.concepto.trim().length < 3) {
+      errs.concepto = "El concepto debe tener al menos 3 caracteres.";
+    }
+    if (!formDirecto.pagador || !formDirecto.pagador.trim()) {
+      errs.pagador = "El nombre del pagador es obligatorio.";
+    } else if (formDirecto.pagador.trim().length < 2) {
+      errs.pagador = "El pagador debe tener al menos 2 caracteres.";
+    }
+
+    if (formDirecto.tipo_origen === "traspaso") {
+      if (!formDirecto.id_socio) {
+        errs.id_socio = "Seleccione la caseta que se transfiere.";
+      }
+      const ventaNum = parseFloat(formDirecto.valor_venta_caseta);
+      if (!formDirecto.valor_venta_caseta || isNaN(ventaNum) || ventaNum <= 0) {
+        errs.valor_venta_caseta = "Ingrese el valor pactado de venta de la caseta (> 0 Bs).";
+      }
+      const pctNum = parseFloat(formDirecto.porcentaje_traspaso);
+      if (isNaN(pctNum) || pctNum <= 0 || pctNum > 100) {
+        errs.porcentaje_traspaso = "El porcentaje debe estar entre 1 y 100%.";
+      }
+    }
+
+    if (formDirecto.tipo_origen === "afiliacion") {
+      if (!formDirecto.id_socio) {
+        errs.id_socio = "Seleccione la caseta para el nuevo socio.";
+      }
+      if (!formDirecto.nuevo_socio_nombres || !formDirecto.nuevo_socio_nombres.trim()) {
+        errs.nuevo_socio_nombres = "Los nombres del nuevo socio son requeridos.";
+      } else if (formDirecto.nuevo_socio_nombres.trim().length < 2) {
+        errs.nuevo_socio_nombres = "Mínimo 2 caracteres.";
+      }
+      if (!formDirecto.nuevo_socio_apellidos || !formDirecto.nuevo_socio_apellidos.trim()) {
+        errs.nuevo_socio_apellidos = "Los apellidos del nuevo socio son requeridos.";
+      } else if (formDirecto.nuevo_socio_apellidos.trim().length < 2) {
+        errs.nuevo_socio_apellidos = "Mínimo 2 caracteres.";
+      }
+      if (!formDirecto.nuevo_socio_ci || !formDirecto.nuevo_socio_ci.trim()) {
+        errs.nuevo_socio_ci = "El carnet de identidad (CI) es obligatorio.";
+      } else if (formDirecto.nuevo_socio_ci.trim().length < 4) {
+        errs.nuevo_socio_ci = "Mínimo 4 caracteres para el CI.";
+      }
+    }
+
+    setDirectoErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
   const handleSubmitDirecto = async (e) => {
     e.preventDefault();
+
+    if (!validateDirecto()) {
+      toast.warning("Por favor complete los campos obligatorios del ingreso", toastOptions);
+      return;
+    }
+
     const montoNum = parseFloat(formDirecto.monto);
-    if (isNaN(montoNum) || montoNum <= 0) {
-      toast.warning("Ingrese un monto válido mayor a 0", toastOptions);
-      return;
-    }
-    if (!formDirecto.concepto.trim()) {
-      toast.warning("El concepto del ingreso es obligatorio", toastOptions);
-      return;
-    }
 
     try {
       setGuardandoDirecto(true);
@@ -419,7 +510,7 @@ function IngresosPage() {
     }
   };
 
-  // Anulación de Recibo con Modal Moderno (sin prompt nativo del navegador)
+  // Anulación de Recibo con Modal Moderno
   const handleAnularRecibo = (recibo) => {
     setConfirmModalData({
       isOpen: true,
@@ -437,7 +528,7 @@ function IngresosPage() {
             auth.config
           );
           toast.success("Recibo anulado con éxito en el libro de ingresos", toastOptions);
-          setConfirmModalData({ isOpen: false });
+          setConfirmModalData(confirmModalInitial);
           fetchDatos();
         } catch (err) {
           toast.error(err.response?.data?.mensaje || "Error al anular recibo", toastOptions);
@@ -504,16 +595,16 @@ function IngresosPage() {
               <ActionButton
                 type="button"
                 $variant="outline"
-                style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}
+                style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}
               >
-                <span>💳</span>
+                <CreditCard size={16} />
                 <span>Ir a Caja de Socios (Luz / Serenaje / Multas)</span>
               </ActionButton>
             </Link>
             <CreateButton
               onClick={handleAbrirModalDirecto}
               style={{
-                display: "flex",
+                display: "inline-flex",
                 alignItems: "center",
                 gap: "0.5rem",
                 background: "linear-gradient(135deg, #059669 0%, #10b981 100%)",
@@ -522,8 +613,8 @@ function IngresosPage() {
                 padding: "0.6rem 1.15rem",
               }}
             >
-              <span>💰</span>
-              <span>+ Registrar Nuevo Ingreso (Traspaso 10% / Afiliación)</span>
+              <Plus size={16} />
+              <span>Registrar Nuevo Ingreso (Traspaso 10% / Afiliación)</span>
             </CreateButton>
           </div>
         </SectionHeader>
@@ -579,11 +670,11 @@ function IngresosPage() {
                 style={{ width: "auto" }}
               >
                 <option value="todos">Todos los Tipos de Ingreso</option>
-                <option value="traspaso">🏷️ Solo Traspasos de Caseta (10%)</option>
-                <option value="afiliacion">🤝 Solo Cuotas de Afiliación</option>
-                <option value="alquiler">🏢 Solo Alquileres</option>
-                <option value="directo">⚡ Solo Extraordinarios / Directos</option>
-                <option value="cargos">🧾 Cuotas Regulares (Luz/Serenaje/Multas)</option>
+                <option value="traspaso">Solo Traspasos de Caseta (10%)</option>
+                <option value="afiliacion">Solo Cuotas de Afiliación</option>
+                <option value="alquiler">Solo Alquileres</option>
+                <option value="directo">Solo Extraordinarios / Directos</option>
+                <option value="cargos">Cuotas Regulares (Luz/Serenaje/Multas)</option>
               </Select>
               <Select
                 value={filtroEstado}
@@ -641,29 +732,33 @@ function IngresosPage() {
                           <strong>#{String(item.nro_recibo || item.id_ingreso).padStart(5, "0")}</strong>
                           {item.tipo_origen === "traspaso" && (
                             <div style={{ marginTop: "0.2rem" }}>
-                              <span style={{ fontSize: "0.68rem", backgroundColor: "rgba(245, 158, 11, 0.15)", color: "#f59e0b", border: "1px solid rgba(245, 158, 11, 0.3)", padding: "1px 5px", borderRadius: "4px", fontWeight: 700 }}>
-                                🏷️ Traspaso 10%
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.68rem", backgroundColor: "rgba(245, 158, 11, 0.15)", color: "#f59e0b", border: "1px solid rgba(245, 158, 11, 0.3)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                <Tag size={11} />
+                                <span>Traspaso 10%</span>
                               </span>
                             </div>
                           )}
                           {item.tipo_origen === "afiliacion" && (
                             <div style={{ marginTop: "0.2rem" }}>
-                              <span style={{ fontSize: "0.68rem", backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.3)", padding: "1px 5px", borderRadius: "4px", fontWeight: 700 }}>
-                                🤝 Afiliación
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.68rem", backgroundColor: "rgba(16, 185, 129, 0.15)", color: "#10b981", border: "1px solid rgba(16, 185, 129, 0.3)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                <UserCheck size={11} />
+                                <span>Afiliación</span>
                               </span>
                             </div>
                           )}
                           {item.tipo_origen === "alquiler" && (
                             <div style={{ marginTop: "0.2rem" }}>
-                              <span style={{ fontSize: "0.68rem", backgroundColor: "rgba(14, 165, 233, 0.15)", color: "#0ea5e9", border: "1px solid rgba(14, 165, 233, 0.3)", padding: "1px 5px", borderRadius: "4px", fontWeight: 700 }}>
-                                🏢 Alquiler
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.68rem", backgroundColor: "rgba(14, 165, 233, 0.15)", color: "#0ea5e9", border: "1px solid rgba(14, 165, 233, 0.3)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                <Building size={11} />
+                                <span>Alquiler</span>
                               </span>
                             </div>
                           )}
                           {item.tipo_origen === "directo" && (
                             <div style={{ marginTop: "0.2rem" }}>
-                              <span style={{ fontSize: "0.68rem", backgroundColor: "rgba(168, 85, 247, 0.15)", color: "#a855f7", border: "1px solid rgba(168, 85, 247, 0.3)", padding: "1px 5px", borderRadius: "4px", fontWeight: 700 }}>
-                                ⚡ Ingreso Directo
+                              <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "0.68rem", backgroundColor: "rgba(168, 85, 247, 0.15)", color: "#a855f7", border: "1px solid rgba(168, 85, 247, 0.3)", padding: "1px 6px", borderRadius: "4px", fontWeight: 700 }}>
+                                <Zap size={11} />
+                                <span>Ingreso Directo</span>
                               </span>
                             </div>
                           )}
@@ -681,8 +776,9 @@ function IngresosPage() {
                           {socio.nro_caseta ? (
                             <strong>Caseta #{socio.nro_caseta}</strong>
                           ) : (
-                            <span style={{ color: "#38bdf8", fontWeight: 700, fontSize: "0.82rem" }}>
-                              🌐 Ingreso Directo / Externo
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#38bdf8", fontWeight: 700, fontSize: "0.82rem" }}>
+                              <Globe size={13} />
+                              <span>Ingreso Directo / Externo</span>
                             </span>
                           )}
                           <div style={{ fontSize: "0.75rem", color: theme.colors.textMuted }}>
@@ -691,7 +787,7 @@ function IngresosPage() {
                         </TableCell>
                         <TableCell>{cajeroNombre}</TableCell>
                         <TableCell style={{ fontWeight: 800, color: theme.colors.success, fontSize: "0.95rem" }}>
-                          {parseFloat(item.monto_total_recibido).toFixed(2)} Bs
+                          {parseFloat(item.monto_total_recibido || 0).toFixed(2)} Bs
                         </TableCell>
                         <TableCell>
                           <StatusBadge $status={item.estado}>{item.estado}</StatusBadge>
@@ -704,8 +800,9 @@ function IngresosPage() {
                               style={{ textDecoration: "none" }}
                             >
                               {({ loading: pdfLoading }) => (
-                                <ViewButton as="span">
-                                  {pdfLoading ? "Generando..." : "🖨️ PDF"}
+                                <ViewButton as="span" style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                                  <Printer size={13} />
+                                  <span>{pdfLoading ? "Generando..." : "PDF"}</span>
                                 </ViewButton>
                               )}
                             </PDFDownloadLink>
@@ -733,17 +830,17 @@ function IngresosPage() {
         title="Registrar Nuevo Ingreso en Caja (Traspaso 10% / Afiliación / Extraordinario)"
         maxWidth="640px"
       >
-        <form onSubmit={handleSubmitDirecto}>
+        <form onSubmit={handleSubmitDirecto} noValidate>
           <FormGroup>
             <Label>Tipo de Ingreso</Label>
             <Select
               value={formDirecto.tipo_origen}
               onChange={(e) => handleDirectoChange("tipo_origen", e.target.value)}
             >
-              <option value="traspaso">🏷️ Traspaso de Caseta (Cobro del 10% del valor de venta)</option>
-              <option value="afiliacion">🤝 Cuota de Afiliación / Nuevo Socio</option>
-              <option value="alquiler">🏢 Alquiler de Espacio Común / Depósito / Baños</option>
-              <option value="directo">⚡ Otro Ingreso Directo / Extraordinario</option>
+              <option value="traspaso">Traspaso de Caseta (Cobro del 10% del valor de venta)</option>
+              <option value="afiliacion">Cuota de Afiliación / Nuevo Socio</option>
+              <option value="alquiler">Alquiler de Espacio Común / Depósito / Baños</option>
+              <option value="directo">Otro Ingreso Directo / Extraordinario</option>
             </Select>
           </FormGroup>
 
@@ -751,34 +848,38 @@ function IngresosPage() {
           {formDirecto.tipo_origen === "traspaso" && (
             <CalculatorBox>
               <div className="calc-title">
-                <span>🧮</span>
+                <Calculator size={16} />
                 <span>Calculadora de Traspaso de Caseta (10% de Ley)</span>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                 <div>
-                  <Label style={{ color: "#d97706" }}>Valor Venta Caseta (Bs.)</Label>
+                  <Label style={{ color: "#d97706" }}>Valor Venta Caseta (Bs.) *</Label>
                   <Input
                     type="number"
                     step="0.01"
                     min="0"
                     placeholder="Ej. 50000"
                     value={formDirecto.valor_venta_caseta}
+                    $hasError={Boolean(directoErrors.valor_venta_caseta)}
                     onChange={(e) => handleDirectoChange("valor_venta_caseta", e.target.value)}
-                    style={{ borderColor: "#f59e0b" }}
+                    style={{ borderColor: directoErrors.valor_venta_caseta ? theme.colors.danger : "#f59e0b" }}
                     autoFocus
                   />
+                  {directoErrors.valor_venta_caseta && <ErrorText>{directoErrors.valor_venta_caseta}</ErrorText>}
                 </div>
                 <div>
-                  <Label style={{ color: "#d97706" }}>% Retención / Traspaso</Label>
+                  <Label style={{ color: "#d97706" }}>% Retención / Traspaso *</Label>
                   <Input
                     type="number"
                     step="0.1"
                     min="1"
                     max="100"
                     value={formDirecto.porcentaje_traspaso}
+                    $hasError={Boolean(directoErrors.porcentaje_traspaso)}
                     onChange={(e) => handleDirectoChange("porcentaje_traspaso", e.target.value)}
-                    style={{ borderColor: "#f59e0b" }}
+                    style={{ borderColor: directoErrors.porcentaje_traspaso ? theme.colors.danger : "#f59e0b" }}
                   />
+                  {directoErrors.porcentaje_traspaso && <ErrorText>{directoErrors.porcentaje_traspaso}</ErrorText>}
                 </div>
               </div>
               <div className="calc-result">
@@ -795,11 +896,12 @@ function IngresosPage() {
               <Label>Nombre del Concepto / Glosa Oficial *</Label>
               <Input
                 type="text"
-                required
                 value={formDirecto.concepto}
+                $hasError={Boolean(directoErrors.concepto)}
                 onChange={(e) => handleDirectoChange("concepto", e.target.value)}
                 placeholder="Ej. Traspaso de Caseta (10%), Cuota de Afiliación..."
               />
+              {directoErrors.concepto && <ErrorText>{directoErrors.concepto}</ErrorText>}
             </FormGroup>
 
             <FormGroup>
@@ -808,22 +910,23 @@ function IngresosPage() {
                 type="number"
                 step="0.01"
                 min="0.01"
-                required
                 value={formDirecto.monto}
+                $hasError={Boolean(directoErrors.monto)}
                 onChange={(e) => handleDirectoChange("monto", e.target.value)}
                 placeholder="0.00"
                 style={{ fontWeight: 800, fontSize: "1rem", color: theme.colors.success }}
               />
+              {directoErrors.monto && <ErrorText>{directoErrors.monto}</ErrorText>}
             </FormGroup>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
             <FormGroup>
-              <Label>Caseta / Socio Saliente (A Traspasar) *</Label>
+              <Label>Caseta / Socio Saliente (A Traspasar) {formDirecto.tipo_origen === "traspaso" || formDirecto.tipo_origen === "afiliacion" ? "*" : ""}</Label>
               <Select
                 value={formDirecto.id_socio}
+                $hasError={Boolean(directoErrors.id_socio)}
                 onChange={(e) => handleDirectoChange("id_socio", e.target.value)}
-                required={formDirecto.tipo_origen === "traspaso" || formDirecto.tipo_origen === "afiliacion"}
               >
                 <option value="">-- Seleccionar caseta a traspasar --</option>
                 {socios.map((s) => {
@@ -835,17 +938,19 @@ function IngresosPage() {
                   );
                 })}
               </Select>
+              {directoErrors.id_socio && <ErrorText>{directoErrors.id_socio}</ErrorText>}
             </FormGroup>
 
             <FormGroup>
               <Label>Nombre en el Recibo (Pagador) *</Label>
               <Input
                 type="text"
-                required
                 value={formDirecto.pagador}
+                $hasError={Boolean(directoErrors.pagador)}
                 onChange={(e) => handleDirectoChange("pagador", e.target.value)}
                 placeholder="Ej. Juan Pérez (Nuevo Adquiriente)"
               />
+              {directoErrors.pagador && <ErrorText>{directoErrors.pagador}</ErrorText>}
             </FormGroup>
           </div>
 
@@ -871,44 +976,48 @@ function IngresosPage() {
                   fontSize: "0.875rem",
                 }}
               >
-                <span>🤝</span>
+                <UserPlus size={16} />
                 <span>Datos del Nuevo Socio Ingresante (Traspaso y Afiliación)</span>
               </div>
-              <p style={{ fontSize: "0.75rem", color: theme.colors.textMuted, marginBottom: "0.75rem", lineHeight: 1.4 }}>
-                ℹ️ Al emitir este recibo de <strong>afiliación / traspaso</strong>, el socio anterior de la caseta seleccionada quedará automáticamente en estado <strong>Inactivo</strong> con baja lógica, asignándose la titularidad de la caseta al nuevo socio.
+              <p style={{ display: "flex", alignItems: "flex-start", gap: "0.35rem", fontSize: "0.75rem", color: theme.colors.textMuted, marginBottom: "0.75rem", lineHeight: 1.4 }}>
+                <Info size={14} style={{ flexShrink: 0, marginTop: "2px" }} />
+                <span>Al emitir este recibo de <strong>afiliación / traspaso</strong>, el socio anterior de la caseta seleccionada quedará automáticamente en estado <strong>Inactivo</strong> con baja lógica, asignándose la titularidad de la caseta al nuevo socio.</span>
               </p>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
                 <FormGroup>
-                  <Label>Nombres del Nuevo Socio *</Label>
+                  <Label>Nombres del Nuevo Socio {formDirecto.tipo_origen === "afiliacion" ? "*" : ""}</Label>
                   <Input
                     type="text"
                     value={formDirecto.nuevo_socio_nombres}
+                    $hasError={Boolean(directoErrors.nuevo_socio_nombres)}
                     onChange={(e) => handleDirectoChange("nuevo_socio_nombres", e.target.value)}
                     placeholder="Ej. Roberto Carlos"
-                    required={formDirecto.tipo_origen === "afiliacion"}
                   />
+                  {directoErrors.nuevo_socio_nombres && <ErrorText>{directoErrors.nuevo_socio_nombres}</ErrorText>}
                 </FormGroup>
                 <FormGroup>
-                  <Label>Apellidos del Nuevo Socio *</Label>
+                  <Label>Apellidos del Nuevo Socio {formDirecto.tipo_origen === "afiliacion" ? "*" : ""}</Label>
                   <Input
                     type="text"
                     value={formDirecto.nuevo_socio_apellidos}
+                    $hasError={Boolean(directoErrors.nuevo_socio_apellidos)}
                     onChange={(e) => handleDirectoChange("nuevo_socio_apellidos", e.target.value)}
                     placeholder="Ej. Mamani Quispe"
-                    required={formDirecto.tipo_origen === "afiliacion"}
                   />
+                  {directoErrors.nuevo_socio_apellidos && <ErrorText>{directoErrors.nuevo_socio_apellidos}</ErrorText>}
                 </FormGroup>
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem", marginTop: "0.5rem" }}>
                 <FormGroup>
-                  <Label>Carnet de Identidad (CI) *</Label>
+                  <Label>Carnet de Identidad (CI) {formDirecto.tipo_origen === "afiliacion" ? "*" : ""}</Label>
                   <Input
                     type="text"
                     value={formDirecto.nuevo_socio_ci}
+                    $hasError={Boolean(directoErrors.nuevo_socio_ci)}
                     onChange={(e) => handleDirectoChange("nuevo_socio_ci", e.target.value)}
                     placeholder="Ej. 7894561 SC"
-                    required={formDirecto.tipo_origen === "afiliacion"}
                   />
+                  {directoErrors.nuevo_socio_ci && <ErrorText>{directoErrors.nuevo_socio_ci}</ErrorText>}
                 </FormGroup>
                 <FormGroup>
                   <Label>Teléfono / Celular</Label>
@@ -964,7 +1073,7 @@ function IngresosPage() {
               disabled={guardandoDirecto || !formDirecto.monto || parseFloat(formDirecto.monto) <= 0}
               style={{ background: "linear-gradient(135deg, #059669 0%, #10b981 100%)" }}
             >
-              {guardandoDirecto ? "Registrando..." : `💰 Registrar Ingreso (${parseFloat(formDirecto.monto || 0).toFixed(2)} Bs)`}
+              {guardandoDirecto ? "Registrando..." : `Registrar Ingreso (${parseFloat(formDirecto.monto || 0).toFixed(2)} Bs)`}
             </CreateButton>
           </div>
         </form>
@@ -979,14 +1088,16 @@ function IngresosPage() {
       >
         {reciboGenerado && (
           <div style={{ textAlign: "center", padding: "1rem 0" }}>
-            <div style={{ fontSize: "3rem", marginBottom: "0.5rem" }}>🎉</div>
+            <div style={{ marginBottom: "0.75rem", display: "flex", justifyContent: "center" }}>
+              <CheckCircle size={48} color={theme.colors.success} />
+            </div>
             <h3 style={{ fontSize: "1.3rem", color: theme.colors.textMain }}>
               Recibo Oficial #{String(reciboGenerado.nro_recibo || reciboGenerado.id_ingreso).padStart(5, "0")}
             </h3>
             <p style={{ color: theme.colors.textMuted, fontSize: "0.9rem", margin: "0.5rem 0 1.25rem" }}>
               Total Cobrado:{" "}
               <strong style={{ color: theme.colors.success, fontSize: "1.2rem" }}>
-                {parseFloat(reciboGenerado.monto_total_recibido).toFixed(2)} Bs
+                {parseFloat(reciboGenerado.monto_total_recibido || 0).toFixed(2)} Bs
               </strong>
             </p>
 
@@ -997,8 +1108,9 @@ function IngresosPage() {
                 style={{ textDecoration: "none" }}
               >
                 {({ loading: pdfLoading }) => (
-                  <CreateButton as="span" style={{ cursor: "pointer", display: "inline-block" }}>
-                    {pdfLoading ? "Generando PDF..." : "🖨️ Descargar Recibo Oficial en PDF"}
+                  <CreateButton as="span" style={{ cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                    <Printer size={16} />
+                    <span>{pdfLoading ? "Generando PDF..." : "Descargar Recibo Oficial en PDF"}</span>
                   </CreateButton>
                 )}
               </PDFDownloadLink>
@@ -1020,9 +1132,9 @@ function IngresosPage() {
         requireReason={confirmModalData.requireReason}
         reasonPlaceholder={confirmModalData.reasonPlaceholder}
         onConfirm={confirmModalData.onConfirm}
-        onClose={() => setConfirmModalData({ isOpen: false })}
+        onClose={() => setConfirmModalData(confirmModalInitial)}
         loading={confirmModalData.loading}
-        danger={true}
+        isDanger={true}
       />
     </PageContainer>
   );

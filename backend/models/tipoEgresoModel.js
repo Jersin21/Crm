@@ -36,6 +36,12 @@ const TipoEgreso = sequelize.define('tipo_egreso', {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   deletedAt: 'deleted_at',
+  indexes: [
+    {
+      name: 'idx_tipos_egreso_asoc',
+      fields: ['id_asociacion'],
+    },
+  ],
 });
 
 module.exports = TipoEgreso;

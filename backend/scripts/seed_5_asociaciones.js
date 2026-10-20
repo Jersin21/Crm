@@ -472,7 +472,16 @@ async function seedCincoAsociaciones() {
   console.log('========================================================');
 }
 
-seedCincoAsociaciones().then(() => process.exit(0)).catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+if (require.main === module) {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED !== 'true') {
+    console.error('⛔ SEGURIDAD: seed_5_asociaciones está deshabilitado en producción sin ALLOW_SEED=true');
+    process.exit(1);
+  }
+
+  seedCincoAsociaciones().then(() => process.exit(0)).catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
+
+module.exports = { seedCincoAsociaciones };

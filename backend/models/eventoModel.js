@@ -64,6 +64,16 @@ const Evento = sequelize.define('evento', {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   deletedAt: 'deleted_at',
+  indexes: [
+    {
+      name: 'idx_eventos_asoc_fecha',
+      fields: ['id_asociacion', 'fecha'],
+    },
+    {
+      name: 'idx_eventos_asoc_tipo',
+      fields: ['id_asociacion', 'tipo_evento'],
+    },
+  ],
 });
 
 module.exports = Evento;

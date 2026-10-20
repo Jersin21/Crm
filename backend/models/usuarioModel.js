@@ -85,6 +85,16 @@ const Usuario = sequelize.define('usuario', {
       attributes: { include: ['token_recuperacion', 'expiracion_token'] },
     },
   },
+  indexes: [
+    {
+      name: 'idx_usuarios_asociacion',
+      fields: ['id_asociacion'],
+    },
+    {
+      name: 'idx_usuarios_persona',
+      fields: ['id_persona'],
+    },
+  ],
 });
 
 module.exports = Usuario;

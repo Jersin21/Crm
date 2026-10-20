@@ -9,9 +9,13 @@ const sequelize = new Sequelize(
   process.env.PASSWORD || '',
   {
     host: process.env.HOST || 'localhost',
-    port: process.env.DB_PORT || 3306,
+    port: parseInt(process.env.DB_PORT, 10) || 3306,
     dialect: 'mysql',
-    logging: false,
+    logging: process.env.NODE_ENV === 'development' ? console.log : false,
+    dialectOptions: {
+      decimalNumbers: true,
+      connectTimeout: 30000,
+    },
     pool: {
       max: parseInt(process.env.DB_POOL_MAX, 10) || 20, // Conexiones concurrentes máximas (óptimo para VPS 2-4GB)
       min: parseInt(process.env.DB_POOL_MIN, 10) || 2,  // Pool caliente: previene latencia de handshake inicial

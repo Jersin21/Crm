@@ -38,12 +38,25 @@ const createTipoEgreso = async (req, res, next) => {
   try {
     const id_asociacion = req.user.id_asociacion;
     const { nombre_categoria } = req.body;
-    if (!nombre_categoria) return res.status(400).json({ mensaje: 'El nombre de la categoría es requerido.' });
-    const tipo = await TipoEgreso.create({
-      id_asociacion, nombre_categoria,
-      created_at: new Date(), updated_at: new Date(),
+    if (!nombre_categoria || !String(nombre_categoria).trim()) {
+      return res.status(400).json({ mensaje: 'El nombre de la categoría es requerido.' });
+    }
+
+    const nombreLimpio = String(nombre_categoria).trim();
+    const existe = await TipoEgreso.findOne({
+      where: { id_asociacion, nombre_categoria: nombreLimpio, deleted_at: null },
     });
-    return res.status(201).json({ mensaje: 'Tipo de egreso creado.', tipo });
+    if (existe) {
+      return res.status(400).json({ mensaje: `La categoría de egreso "${nombreLimpio}" ya existe en esta asociación.` });
+    }
+
+    const tipo = await TipoEgreso.create({
+      id_asociacion,
+      nombre_categoria: nombreLimpio,
+      created_at: new Date(),
+      updated_at: new Date(),
+    });
+    return res.status(201).json({ mensaje: 'Tipo de egreso creado exitosamente.', tipo });
   } catch (error) {
     next(error);
   }
@@ -58,8 +71,11 @@ const updateTipoEgreso = async (req, res, next) => {
     const id_asociacion = req.user.id_asociacion;
     const tipo = await TipoEgreso.findOne({ where: { id_tipo_egreso: id, id_asociacion, deleted_at: null } });
     if (!tipo) return res.status(404).json({ mensaje: 'Tipo de egreso no encontrado.' });
+
     const { nombre_categoria } = req.body;
-    await tipo.update({ nombre_categoria, updated_at: new Date() });
+    if (nombre_categoria !== undefined) {
+      await tipo.update({ nombre_categoria: String(nombre_categoria).trim(), updated_at: new Date() });
+    }
     return res.status(200).json({ mensaje: 'Tipo de egreso actualizado.', tipo });
   } catch (error) {
     next(error);
@@ -75,8 +91,8 @@ const deleteTipoEgreso = async (req, res, next) => {
     const id_asociacion = req.user.id_asociacion;
     const tipo = await TipoEgreso.findOne({ where: { id_tipo_egreso: id, id_asociacion, deleted_at: null } });
     if (!tipo) return res.status(404).json({ mensaje: 'Tipo de egreso no encontrado.' });
-    await tipo.update({ deleted_at: new Date(), updated_at: new Date() });
-    return res.status(200).json({ mensaje: 'Tipo de egreso eliminado.' });
+    await tipo.destroy();
+    return res.status(200).json({ mensaje: 'Tipo de egreso eliminado correctamente.' });
   } catch (error) {
     next(error);
   }

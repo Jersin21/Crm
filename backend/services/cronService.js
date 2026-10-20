@@ -157,25 +157,68 @@ const verificarMorasAportesAutomatico = async () => {
   }
 };
 
+let cronTimer = null;
+let isRunningSerenaje = false;
+let isRunningMoras = false;
+
+const ejecutarTareasCron = async () => {
+  if (!isRunningSerenaje) {
+    isRunningSerenaje = true;
+    try {
+      await verificarYGenerarSerenajeAutomatico();
+    } finally {
+      isRunningSerenaje = false;
+    }
+  }
+
+  if (!isRunningMoras) {
+    isRunningMoras = true;
+    try {
+      await verificarMorasAportesAutomatico();
+    } finally {
+      isRunningMoras = false;
+    }
+  }
+};
+
 /**
  * iniciarCronJobs:
  * Arranca la verificación inmediata y programa la ejecución periódica
  */
 const iniciarCronJobs = () => {
-  // Ejecución inicial al arrancar el servidor
-  verificarYGenerarSerenajeAutomatico();
-  verificarMorasAportesAutomatico();
+  if (cronTimer) {
+    clearInterval(cronTimer);
+  }
+
+  // Ejecución inicial al arrancar el servidor (no bloqueante)
+  ejecutarTareasCron().catch((err) => {
+    console.error('Error en ejecución inicial de cron:', err.message);
+  });
 
   // Revisión periódica cada 1 hora
   const UN_HORA_MS = 1000 * 60 * 60;
-  setInterval(() => {
-    verificarYGenerarSerenajeAutomatico();
-    verificarMorasAportesAutomatico();
+  cronTimer = setInterval(() => {
+    ejecutarTareasCron().catch((err) => {
+      console.error('Error en ejecución periódica de cron:', err.message);
+    });
   }, UN_HORA_MS);
+
+  // Permitir que el proceso de Node.js termine limpiamente en tests o shutdown
+  if (cronTimer && typeof cronTimer.unref === 'function') {
+    cronTimer.unref();
+  }
+};
+
+const detenerCronJobs = () => {
+  if (cronTimer) {
+    clearInterval(cronTimer);
+    cronTimer = null;
+  }
 };
 
 module.exports = {
   iniciarCronJobs,
+  detenerCronJobs,
   verificarYGenerarSerenajeAutomatico,
   verificarMorasAportesAutomatico,
 };

@@ -1,5 +1,5 @@
 // Rutas de la API del backend de MercadoCRM
-export const host = "http://localhost:3031";
+export const host = (import.meta.env?.VITE_API_URL || "http://localhost:3031").replace(/\/$/, "");
 
 // Autenticación y Usuarios
 export const loginRoute = `${host}/api/auth/login`;

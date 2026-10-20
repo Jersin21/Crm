@@ -47,6 +47,16 @@ const Persona = sequelize.define('persona', {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   deletedAt: 'deleted_at',
+  indexes: [
+    {
+      name: 'idx_personas_ci',
+      fields: ['ci'],
+    },
+    {
+      name: 'idx_personas_apellidos_nombres',
+      fields: ['apellidos', 'nombres'],
+    },
+  ],
 });
 
 module.exports = Persona;

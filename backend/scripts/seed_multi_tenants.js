@@ -275,12 +275,23 @@ async function seedMultiTenants() {
 
     await t.commit();
     console.log('🎉 Seed de Multi-tenants completado exitosamente.');
+    return { ok: true };
   } catch (error) {
     await t.rollback();
     console.error('❌ Error en seedMultiTenants:', error);
-  } finally {
-    process.exit(0);
+    throw error;
   }
 }
 
-seedMultiTenants();
+if (require.main === module) {
+  if (process.env.NODE_ENV === 'production' && process.env.ALLOW_SEED !== 'true') {
+    console.error('⛔ SEGURIDAD: seed_multi_tenants está deshabilitado en producción sin ALLOW_SEED=true');
+    process.exit(1);
+  }
+
+  seedMultiTenants()
+    .then(() => process.exit(0))
+    .catch(() => process.exit(1));
+}
+
+module.exports = { seedMultiTenants };

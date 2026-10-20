@@ -21,6 +21,11 @@ const getAsociaciones = async (req, res, next) => {
 const getAsociacion = async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    if (req.user.rol !== 'SUPERADMIN_SAAS' && parseInt(id, 10) !== parseInt(req.user.id_asociacion, 10)) {
+      return res.status(403).json({ mensaje: 'Acceso denegado: No tiene permisos para consultar otra asociación.' });
+    }
+
     const asociacion = await Asociacion.findOne({
       where: { id_asociacion: id, deleted_at: null },
     });
@@ -61,12 +66,26 @@ const createAsociacion = async (req, res, next) => {
 const updateAsociacion = async (req, res, next) => {
   try {
     const { id } = req.params;
+
+    if (req.user.rol !== 'SUPERADMIN_SAAS' && parseInt(id, 10) !== parseInt(req.user.id_asociacion, 10)) {
+      return res.status(403).json({ mensaje: 'Acceso denegado: No tiene permisos para modificar otra asociación.' });
+    }
+
     const asociacion = await Asociacion.findOne({ where: { id_asociacion: id, deleted_at: null } });
     if (!asociacion) {
       return res.status(404).json({ mensaje: 'Asociación no encontrada.' });
     }
     const { nombre_mercado, direccion, estado } = req.body;
-    await asociacion.update({ nombre_mercado, direccion, estado, updated_at: new Date() });
+    const updatePayload = {
+      ...(nombre_mercado !== undefined ? { nombre_mercado } : {}),
+      ...(direccion !== undefined ? { direccion } : {}),
+      updated_at: new Date(),
+    };
+    if (req.user.rol === 'SUPERADMIN_SAAS' && estado !== undefined) {
+      updatePayload.estado = estado;
+    }
+
+    await asociacion.update(updatePayload);
     return res.status(200).json({ mensaje: 'Asociación actualizada.', asociacion });
   } catch (error) {
     next(error);

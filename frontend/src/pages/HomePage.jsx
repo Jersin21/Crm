@@ -3,6 +3,7 @@ import styled from "styled-components";
 import axios from "axios";
 import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
+import { Users, Clock, TrendingUp, TrendingDown, Wallet } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
@@ -167,7 +168,9 @@ function HomePage() {
           saldoNeto: totIng - totEg,
         });
       } catch (err) {
-        console.error("Error cargando estadísticas:", err);
+        if (import.meta.env?.DEV) {
+          console.error("Error cargando estadísticas:", err);
+        }
         toast.error("No se pudieron cargar las estadísticas", toastOptions);
       } finally {
         setLoadingStats(false);
@@ -217,7 +220,7 @@ function HomePage() {
         <WelcomeCard>
           <div>
             <h2>
-              ¡Bienvenido a {auth?.nombre_asociacion || auth?.asociacion?.nombre_mercado || "la Asociación"}! 👋
+              ¡Bienvenido a {auth?.nombre_asociacion || auth?.asociacion?.nombre_mercado || "la Asociación"}!
             </h2>
             <p>
               Usuario: <strong>{auth?.nombres ? `${auth.nombres} ${auth.apellidos || ""}`.trim() : (auth?.username || "Usuario")}</strong> ({auth?.username}) — Panel de control operativo.
@@ -229,7 +232,9 @@ function HomePage() {
         {/* Tarjetas de estadísticas */}
         <StatsGrid>
           <StatCard>
-            <StatIcon $bg="rgba(16, 185, 129, 0.15)">👥</StatIcon>
+            <StatIcon $bg="rgba(16, 185, 129, 0.15)">
+              <Users size={22} color={theme.colors.success} />
+            </StatIcon>
             <StatInfo>
               <h3>{loadingStats ? "..." : stats.totalSocios}</h3>
               <p>Socios Activos</p>
@@ -237,7 +242,9 @@ function HomePage() {
           </StatCard>
 
           <StatCard>
-            <StatIcon $bg="rgba(245, 158, 11, 0.15)">📋</StatIcon>
+            <StatIcon $bg="rgba(245, 158, 11, 0.15)">
+              <Clock size={22} color={theme.colors.warning} />
+            </StatIcon>
             <StatInfo>
               <h3>{loadingStats ? "..." : stats.cargosPendientes}</h3>
               <p>Cargos Pendientes de Cobro</p>
@@ -247,7 +254,9 @@ function HomePage() {
           {puedeVerFinanzas && (
             <>
               <StatCard>
-                <StatIcon $bg="rgba(14, 165, 233, 0.15)">💰</StatIcon>
+                <StatIcon $bg="rgba(14, 165, 233, 0.15)">
+                  <TrendingUp size={22} color={theme.colors.primary} />
+                </StatIcon>
                 <StatInfo>
                   <h3 style={{ fontSize: "1.25rem", color: theme.colors.primary }}>
                     {loadingStats ? "..." : formatMonto(stats.totalIngresos)}
@@ -257,7 +266,9 @@ function HomePage() {
               </StatCard>
 
               <StatCard>
-                <StatIcon $bg="rgba(239, 68, 68, 0.15)">💸</StatIcon>
+                <StatIcon $bg="rgba(239, 68, 68, 0.15)">
+                  <TrendingDown size={22} color={theme.colors.danger} />
+                </StatIcon>
                 <StatInfo>
                   <h3 style={{ fontSize: "1.25rem", color: theme.colors.danger }}>
                     {loadingStats ? "..." : formatMonto(stats.totalEgresos)}
@@ -267,7 +278,9 @@ function HomePage() {
               </StatCard>
 
               <StatCard>
-                <StatIcon $bg="rgba(16, 185, 129, 0.15)">🏦</StatIcon>
+                <StatIcon $bg="rgba(16, 185, 129, 0.15)">
+                  <Wallet size={22} color={theme.colors.success} />
+                </StatIcon>
                 <StatInfo>
                   <h3 style={{ fontSize: "1.25rem", color: stats.saldoNeto >= 0 ? theme.colors.success : theme.colors.danger }}>
                     {loadingStats ? "..." : formatMonto(stats.saldoNeto)}

@@ -4,7 +4,8 @@
   "description": "Backend CRM para Asociaciones de Mercados",
   "main": "index.js",
   "scripts": {
-    "start": "nodemon index.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "node tests/api.test.js"
   },
   "dependencies": {

@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { Asistencia, Evento, Socio, Cargo, ConceptoCobro, Persona } = require('../models');
 
 /**
@@ -183,33 +184,45 @@ const aplicarMultasEvento = async (req, res, next) => {
     fechaVencimiento.setDate(fechaVencimiento.getDate() + (concepto.dias_gracia || 5) + 15);
 
     let cargosCreados = 0;
-    for (const a of asistenciasFalta) {
-      const existe = await Cargo.findOne({
+    if (asistenciasFalta.length > 0) {
+      const idsAsistencias = asistenciasFalta.map(a => a.id_asistencia);
+      const cargosExistentes = await Cargo.findAll({
         where: {
-          id_socio: a.id_socio,
-          id_referencia_origen: a.id_asistencia,
+          id_asociacion,
+          id_referencia_origen: { [Op.in]: idsAsistencias },
           tipo_origen: 'evento',
           deleted_at: null,
         },
+        attributes: ['id_referencia_origen'],
       });
 
-      if (!existe) {
-        await Cargo.create({
-          id_socio: a.id_socio,
-          id_asociacion,
-          id_concepto: concepto.id_concepto,
-          id_referencia_origen: a.id_asistencia,
-          tipo_origen: 'evento',
-          periodo: fechaEvento.toISOString().slice(0, 7),
-          detalle: `Multa por inasistencia en: ${evento.nombre_evento} (${evento.tipo_evento})`,
-          monto_capital_inicial: montoMulta,
-          saldo_capital_pendiente: montoMulta,
-          monto_mora_acumulada: 0,
-          fecha_vencimiento: fechaVencimiento,
-          estado: 'Pendiente',
-          created_at: new Date(), updated_at: new Date(),
-        });
-        cargosCreados++;
+      const setExistentes = new Set(cargosExistentes.map(c => c.id_referencia_origen));
+      const cargosAInsertar = [];
+
+      for (const a of asistenciasFalta) {
+        if (!setExistentes.has(a.id_asistencia)) {
+          cargosAInsertar.push({
+            id_socio: a.id_socio,
+            id_asociacion,
+            id_concepto: concepto.id_concepto,
+            id_referencia_origen: a.id_asistencia,
+            tipo_origen: 'evento',
+            periodo: fechaEvento.toISOString().slice(0, 7),
+            detalle: `Multa por inasistencia en: ${evento.nombre_evento} (${evento.tipo_evento})`,
+            monto_capital_inicial: montoMulta,
+            saldo_capital_pendiente: montoMulta,
+            monto_mora_acumulada: 0,
+            fecha_vencimiento: fechaVencimiento,
+            estado: 'Pendiente',
+            created_at: new Date(),
+            updated_at: new Date(),
+          });
+        }
+      }
+
+      if (cargosAInsertar.length > 0) {
+        await Cargo.bulkCreate(cargosAInsertar);
+        cargosCreados = cargosAInsertar.length;
       }
     }
 
@@ -269,17 +282,23 @@ const getAsistenciasByEvento = async (req, res, next) => {
           },
         });
 
+        const idsAsistencias = asistenciasFalta.map((a) => a.id_asistencia);
+        const cargosExistentes = await Cargo.findAll({
+          where: {
+            id_asociacion,
+            id_referencia_origen: { [Op.in]: idsAsistencias },
+            tipo_origen: 'evento',
+            deleted_at: null,
+          },
+          attributes: ['id_referencia_origen'],
+        });
+
+        const setExistentes = new Set(cargosExistentes.map((c) => c.id_referencia_origen));
+        const cargosAInsertar = [];
+
         for (const a of asistenciasFalta) {
-          const existeCargo = await Cargo.findOne({
-            where: {
-              id_socio: a.id_socio,
-              id_referencia_origen: a.id_asistencia,
-              tipo_origen: 'evento',
-              deleted_at: null,
-            },
-          });
-          if (!existeCargo) {
-            await Cargo.create({
+          if (!setExistentes.has(a.id_asistencia)) {
+            cargosAInsertar.push({
               id_socio: a.id_socio,
               id_asociacion,
               id_concepto: conceptoAuto.id_concepto,
@@ -296,6 +315,10 @@ const getAsistenciasByEvento = async (req, res, next) => {
               updated_at: new Date(),
             });
           }
+        }
+
+        if (cargosAInsertar.length > 0) {
+          await Cargo.bulkCreate(cargosAInsertar);
         }
       }
     }

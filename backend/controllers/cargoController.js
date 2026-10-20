@@ -461,6 +461,12 @@ const getResumenDeudasSocios = async (req, res, next) => {
         order: [['fecha_vencimiento', 'ASC']],
       }),
       ConsumoLuz.findAll({
+        include: [{
+          model: Socio,
+          as: 'socio',
+          where: { id_asociacion, deleted_at: null },
+          attributes: ['id_socio'],
+        }],
         where: { deleted_at: null },
         order: [['mes_anio', 'DESC']],
       }),
@@ -473,9 +479,26 @@ const getResumenDeudasSocios = async (req, res, next) => {
       if (s.nro_caseta) casetasPorPersona[s.id_persona].push(s.nro_caseta);
     }
 
+    // Indexar cargos pendientes por socio en O(1)
+    const cargosPorSocio = new Map();
+    for (const c of cargosPendientes) {
+      if (!cargosPorSocio.has(c.id_socio)) {
+        cargosPorSocio.set(c.id_socio, []);
+      }
+      cargosPorSocio.get(c.id_socio).push(c);
+    }
+
+    // Indexar última lectura de luz por socio en O(1)
+    const ultimaLecturaPorSocio = new Map();
+    for (const cl of consumosLuz) {
+      if (!ultimaLecturaPorSocio.has(cl.id_socio)) {
+        ultimaLecturaPorSocio.set(cl.id_socio, cl.lectura_actual);
+      }
+    }
+
     const resumen = socios.map((s) => {
       const p = s.persona || {};
-      const misCargos = cargosPendientes.filter((c) => c.id_socio === s.id_socio);
+      const misCargos = cargosPorSocio.get(s.id_socio) || [];
 
       // Clasificación
       const cargosLuz = misCargos.filter(
@@ -517,8 +540,7 @@ const getResumenDeudasSocios = async (req, res, next) => {
       const totalOtros = calcTotal(cargosOtros);
       const totalGeneral = totalLuz + totalSerenaje + totalMultas + totalAportes + totalOtros;
 
-      const lecturasSocio = consumosLuz.filter((cl) => cl.id_socio === s.id_socio);
-      const ultimaLectura = lecturasSocio.length > 0 ? lecturasSocio[0].lectura_actual : null;
+      const ultimaLectura = ultimaLecturaPorSocio.get(s.id_socio) ?? null;
 
       return {
         id_socio: s.id_socio,

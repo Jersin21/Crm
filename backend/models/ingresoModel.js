@@ -100,6 +100,10 @@ const Ingreso = sequelize.define('ingreso', {
       name: 'idx_ingresos_asoc_estado',
       fields: ['id_asociacion', 'estado'],
     },
+    {
+      name: 'idx_ingresos_asoc_cajero',
+      fields: ['id_asociacion', 'id_usuario'],
+    },
   ],
 });
 

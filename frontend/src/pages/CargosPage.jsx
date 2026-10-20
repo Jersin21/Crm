@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import styled from "styled-components";
 import axios from "axios";
 import { toast } from "react-toastify";
+import ConfirmModal from "../components/ConfirmModal";
+import { Zap } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
@@ -74,29 +76,54 @@ function CargosPage() {
     if (auth?.config) fetchCargos();
   }, [auth, filtroEstado, filtroPeriodo]);
 
-  const handleCalcularMoras = async () => {
-    if (!window.confirm("¿Deseas ejecutar el cálculo automático de moras para todas las deudas vencidas?")) return;
-    try {
-      setCalculandoMora(true);
-      const { data } = await axios.post(`${cargosRoute}/calcular-moras`, {}, auth.config);
-      toast.success(data.mensaje || "Moras calculadas y actualizadas correctamente", toastOptions);
-      fetchCargos();
-    } catch (err) {
-      toast.error(err.response?.data?.mensaje || "Error al calcular moras", toastOptions);
-    } finally {
-      setCalculandoMora(false);
-    }
+  const [confirmModal, setConfirmModal] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+    variant: "danger",
+    confirmText: "Confirmar",
+  });
+
+  const handleCalcularMoras = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Calcular Moras Automáticas",
+      message: "¿Deseas ejecutar el cálculo automático de moras para todas las deudas vencidas?",
+      variant: "warning",
+      confirmText: "Calcular Moras",
+      onConfirm: async () => {
+        try {
+          setCalculandoMora(true);
+          const { data } = await axios.post(`${cargosRoute}/calcular-moras`, {}, auth.config);
+          toast.success(data.mensaje || "Moras calculadas y actualizadas correctamente", toastOptions);
+          fetchCargos();
+        } catch (err) {
+          toast.error(err.response?.data?.mensaje || "Error al calcular moras", toastOptions);
+        } finally {
+          setCalculandoMora(false);
+        }
+      },
+    });
   };
 
-  const handleAnular = async (cargo) => {
-    if (!window.confirm(`¿Deseas anular el cargo de ${cargo.detalle || "este concepto"}?`)) return;
-    try {
-      await axios.put(`${cargosRoute}/${cargo.id_cargo}/anular`, {}, auth.config);
-      toast.success("Cargo anulado correctamente", toastOptions);
-      fetchCargos();
-    } catch (err) {
-      toast.error("Error al anular cargo", toastOptions);
-    }
+  const handleAnular = (cargo) => {
+    setConfirmModal({
+      isOpen: true,
+      title: "Anular Cargo",
+      message: `¿Estás seguro de anular el cargo de ${cargo.detalle || "este concepto"}? Esta acción no se puede deshacer.`,
+      variant: "danger",
+      confirmText: "Anular Cargo",
+      onConfirm: async () => {
+        try {
+          await axios.put(`${cargosRoute}/${cargo.id_cargo}/anular`, {}, auth.config);
+          toast.success("Cargo anulado correctamente", toastOptions);
+          fetchCargos();
+        } catch (err) {
+          toast.error(err.response?.data?.mensaje || "Error al anular cargo", toastOptions);
+        }
+      },
+    });
   };
 
   const cargosFiltrados = cargos.filter((c) => {
@@ -126,8 +153,10 @@ function CargosPage() {
               $variant="warning"
               disabled={calculandoMora}
               onClick={handleCalcularMoras}
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
             >
-              {calculandoMora ? "Calculando..." : "⚡ Calcular Moras del Mes"}
+              <Zap size={14} />
+              {calculandoMora ? "Calculando..." : "Calcular Moras del Mes"}
             </ActionButton>
           </div>
         </SectionHeader>
@@ -226,9 +255,9 @@ function CargosPage() {
                         <TableCell>{c.periodo}</TableCell>
                         <TableCell style={{ maxWidth: "200px" }}>{c.detalle}</TableCell>
                         <TableCell style={{ fontWeight: 600 }}>
-                          {parseFloat(c.saldo_capital_pendiente).toFixed(2)} Bs
+                          {parseFloat(c.saldo_capital_pendiente || 0).toFixed(2)} Bs
                         </TableCell>
-                        <TableCell style={{ color: parseFloat(c.monto_mora_acumulada) > 0 ? theme.colors.danger : theme.colors.textMuted }}>
+                        <TableCell style={{ color: parseFloat(c.monto_mora_acumulada || 0) > 0 ? theme.colors.danger : theme.colors.textMuted }}>
                           {parseFloat(c.monto_mora_acumulada || 0).toFixed(2)} Bs
                         </TableCell>
                         <TableCell style={{ fontWeight: 700, color: theme.colors.textMain }}>
@@ -254,6 +283,16 @@ function CargosPage() {
           </TableResponsiveWrapper>
         </TableCard>
       </ContentContainer>
+
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        onConfirm={confirmModal.onConfirm}
+        onClose={() => setConfirmModal((prev) => ({ ...prev, isOpen: false }))}
+        variant={confirmModal.variant}
+        confirmText={confirmModal.confirmText}
+      />
     </PageContainer>
   );
 }

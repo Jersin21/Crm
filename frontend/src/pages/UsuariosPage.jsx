@@ -3,6 +3,8 @@ import styled from "styled-components";
 import axios from "axios";
 import { toast } from "react-toastify";
 import Sidebar from "../components/Sidebar";
+import Modal from "../components/Modal";
+import ConfirmModal from "../components/ConfirmModal";
 import useAuth from "../hooks/authHooks";
 import toastOptions from "../utils/toastOptions";
 import theme from "../styles/theme";
@@ -10,7 +12,6 @@ import {
   PageContainer,
   ContentContainer,
   SectionHeader,
-  Card,
   TableCard,
   TableToolbar,
   TableResponsiveWrapper,
@@ -28,24 +29,6 @@ import { host } from "../utils/APIroutes";
 
 const usuariosRoute = `${host}/api/usuarios`;
 
-const ModalOverlay = styled.div`
-  position: fixed;
-  inset: 0;
-  background-color: rgba(5, 10, 23, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  padding: 1rem;
-`;
-
-const ModalCard = styled(Card)`
-  width: 100%;
-  max-width: 560px;
-  max-height: 90vh;
-  overflow-y: auto;
-`;
-
 const FormGrid = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -61,7 +44,9 @@ const FormGroup = styled.div`
   flex-direction: column;
   gap: 0.375rem;
 
-  &.full { grid-column: 1 / -1; }
+  &.full {
+    grid-column: 1 / -1;
+  }
 `;
 
 const Label = styled.label`
@@ -75,7 +60,7 @@ const Label = styled.label`
 const Input = styled.input`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -84,8 +69,16 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    box-shadow: 0 0 0 3px ${({ $hasError }) => ($hasError ? "rgba(239, 68, 68, 0.2)" : "rgba(14, 165, 233, 0.15)")};
   }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
 `;
 
 const Select = styled.select`
@@ -98,7 +91,33 @@ const Select = styled.select`
   width: 100%;
   box-sizing: border-box;
 
-  option { background-color: ${theme.colors.bgCard}; }
+  option {
+    background-color: ${theme.colors.bgCard};
+  }
+`;
+
+const FormActions = styled.div`
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+`;
+
+const CancelButton = styled.button`
+  padding: 0.65rem 1.25rem;
+  border-radius: ${theme.radius.md};
+  border: 1px solid ${theme.colors.border};
+  background: transparent;
+  color: ${theme.colors.textMuted};
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: ${theme.colors.textMain};
+  }
 `;
 
 const estadoInicial = {
@@ -112,6 +131,47 @@ const estadoInicial = {
   rol: "SEC_HACIENDA",
 };
 
+const getRolBadge = (rol) => {
+  switch (rol) {
+    case "PRESIDENTE":
+      return {
+        label: "Presidente",
+        bg: "rgba(14, 165, 233, 0.15)",
+        color: theme.colors.primary,
+      };
+    case "SEC_HACIENDA":
+      return {
+        label: "Sec. Hacienda",
+        bg: "rgba(16, 185, 129, 0.15)",
+        color: theme.colors.success,
+      };
+    case "SEC_NACIONAL":
+      return {
+        label: "Sec. General",
+        bg: "rgba(245, 158, 11, 0.15)",
+        color: theme.colors.warning,
+      };
+    case "LECTURADOR":
+      return {
+        label: "Lecturador Luz",
+        bg: "rgba(139, 92, 246, 0.15)",
+        color: "#a78bfa",
+      };
+    case "CAJERO":
+      return {
+        label: "Cajero",
+        bg: "rgba(236, 72, 153, 0.15)",
+        color: "#f472b6",
+      };
+    default:
+      return {
+        label: rol || "Usuario",
+        bg: "rgba(148, 163, 184, 0.15)",
+        color: theme.colors.textMuted,
+      };
+  }
+};
+
 function UsuariosPage() {
   const { auth } = useAuth();
   const [usuarios, setUsuarios] = useState([]);
@@ -120,6 +180,34 @@ function UsuariosPage() {
   const [modalAbierto, setModalAbierto] = useState(false);
   const [formData, setFormData] = useState(estadoInicial);
   const [guardando, setGuardando] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  // Estado para confirmación de eliminación accesible
+  const [usuarioAEliminar, setUsuarioAEliminar] = useState(null);
+  const [eliminando, setEliminando] = useState(false);
+
+  const validateForm = () => {
+    const errs = {};
+    if (!formData.nombres || formData.nombres.trim().length < 2) {
+      errs.nombres = "El nombre es obligatorio (mínimo 2 caracteres)";
+    }
+    if (!formData.apellidos || formData.apellidos.trim().length < 2) {
+      errs.apellidos = "Los apellidos son obligatorios (mínimo 2 caracteres)";
+    }
+    if (!formData.username || formData.username.trim().length < 3) {
+      errs.username = "El nombre de usuario debe tener al menos 3 caracteres";
+    } else if (/\s/.test(formData.username)) {
+      errs.username = "No debe contener espacios en blanco";
+    }
+    if (!formData.password || formData.password.length < 6) {
+      errs.password = "La contraseña debe tener al menos 6 caracteres";
+    }
+    if (formData.ci && formData.ci.trim().length > 0 && formData.ci.trim().length < 4) {
+      errs.ci = "El CI debe tener al menos 4 caracteres";
+    }
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
 
   const fetchUsuarios = async () => {
     try {
@@ -127,7 +215,10 @@ function UsuariosPage() {
       const { data } = await axios.get(usuariosRoute, auth.config);
       setUsuarios(Array.isArray(data) ? data : data.usuarios || []);
     } catch (err) {
-      toast.error("Error al cargar la directiva y cajeros", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cargar los usuarios directivos",
+        toastOptions
+      );
     } finally {
       setLoading(false);
     }
@@ -139,16 +230,17 @@ function UsuariosPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.username.trim() || !formData.password.trim() || !formData.nombres.trim()) {
-      toast.error("Completa los campos obligatorios", toastOptions);
+    if (!validateForm()) {
+      toast.error("Por favor completa los campos marcados en rojo", toastOptions);
       return;
     }
     try {
       setGuardando(true);
       await axios.post(usuariosRoute, formData, auth.config);
-      toast.success("Usuario directivo registrado con éxito", toastOptions);
+      toast.success("Usuario registrado con éxito en el sistema", toastOptions);
       setModalAbierto(false);
       setFormData(estadoInicial);
+      setErrors({});
       fetchUsuarios();
     } catch (err) {
       toast.error(err.response?.data?.mensaje || "Error al crear usuario", toastOptions);
@@ -160,29 +252,43 @@ function UsuariosPage() {
   const handleToggleEstado = async (u) => {
     try {
       await axios.put(`${usuariosRoute}/${u.id_usuario}/estado`, {}, auth.config);
-      toast.success("Estado de usuario actualizado", toastOptions);
+      toast.success(
+        `Usuario @${u.username} ${u.estado ? "desactivado" : "activado"} correctamente`,
+        toastOptions
+      );
       fetchUsuarios();
     } catch (err) {
-      toast.error("Error al cambiar estado", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al cambiar el estado del usuario",
+        toastOptions
+      );
     }
   };
 
-  const handleEliminar = async (u) => {
-    if (!window.confirm(`¿Eliminar al usuario ${u.username}?`)) return;
+  const confirmarEliminacion = async () => {
+    if (!usuarioAEliminar) return;
     try {
-      await axios.delete(`${usuariosRoute}/${u.id_usuario}`, auth.config);
-      toast.success("Usuario eliminado", toastOptions);
+      setEliminando(true);
+      await axios.delete(`${usuariosRoute}/${usuarioAEliminar.id_usuario}`, auth.config);
+      toast.success(`Usuario @${usuarioAEliminar.username} eliminado correctamente`, toastOptions);
+      setUsuarioAEliminar(null);
       fetchUsuarios();
     } catch (err) {
-      toast.error(err.response?.data?.mensaje || "Error al eliminar usuario", toastOptions);
+      toast.error(
+        err.response?.data?.mensaje || "Error al eliminar el usuario del sistema",
+        toastOptions
+      );
+    } finally {
+      setEliminando(false);
     }
   };
 
   const usuariosFiltrados = usuarios.filter((u) => {
     const nombre = `${u.persona?.nombres || ""} ${u.persona?.apellidos || ""}`.toLowerCase();
     const username = (u.username || "").toLowerCase();
-    const q = busqueda.toLowerCase();
-    return nombre.includes(q) || username.includes(q);
+    const ci = (u.persona?.ci || "").toLowerCase();
+    const q = busqueda.trim().toLowerCase();
+    return nombre.includes(q) || username.includes(q) || ci.includes(q);
   });
 
   return (
@@ -192,7 +298,7 @@ function UsuariosPage() {
         <SectionHeader>
           <div className="titles">
             <h1>Directiva y Usuarios del Sistema</h1>
-            <p>Administración de cuentas para Presidente, Secretaria de Hacienda y Secretaria Nacional</p>
+            <p>Administración de roles, permisos y credenciales operativas del mercado</p>
           </div>
           <div className="actions">
             <CreateButton onClick={() => setModalAbierto(true)}>+ Nuevo Operador</CreateButton>
@@ -202,7 +308,7 @@ function UsuariosPage() {
         <TableCard>
           <TableToolbar>
             <SearchInput
-              placeholder="Buscar por nombre o usuario..."
+              placeholder="Buscar por nombre, usuario o CI..."
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
             />
@@ -233,57 +339,83 @@ function UsuariosPage() {
                 ) : usuariosFiltrados.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={7} style={{ textAlign: "center", color: theme.colors.textMuted }}>
-                      No hay usuarios registrados
+                      No se encontraron usuarios registrados
                     </TableCell>
                   </TableRow>
                 ) : (
-                  usuariosFiltrados.map((u) => (
-                    <TableRow key={u.id_usuario}>
-                      <TableCell><strong>@{u.username}</strong></TableCell>
-                      <TableCell>{u.persona ? `${u.persona.nombres} ${u.persona.apellidos}` : "-"}</TableCell>
-                      <TableCell>
-                        <span style={{
-                          padding: "0.25rem 0.6rem",
-                          borderRadius: theme.radius.sm,
-                          fontWeight: 700,
-                          fontSize: "0.78rem",
-                          background: u.rol === "PRESIDENTE" ? "rgba(14, 165, 233, 0.15)" : u.rol === "SEC_HACIENDA" ? "rgba(16, 185, 129, 0.15)" : "rgba(245, 158, 11, 0.15)",
-                          color: u.rol === "PRESIDENTE" ? theme.colors.primary : u.rol === "SEC_HACIENDA" ? theme.colors.success : theme.colors.warning,
-                        }}>
-                          {u.rol === "PRESIDENTE" ? "Presidente" : u.rol === "SEC_HACIENDA" ? "Sec. Hacienda" : "Sec. Nacional"}
-                        </span>
-                      </TableCell>
-                      <TableCell>{u.persona?.ci || "-"}</TableCell>
-                      <TableCell>{u.persona?.telefono || "-"}</TableCell>
-                      <TableCell>
-                        <StatusBadge $status={u.estado ? "Activo" : "Inactivo"}>
-                          {u.estado ? "Activo" : "Inactivo"}
-                        </StatusBadge>
-                      </TableCell>
-                      <TableCell>
-                        <div style={{ display: "flex", gap: "0.4rem" }}>
-                          <button
-                            type="button"
-                            style={{
-                              background: "rgba(255, 255, 255, 0.08)",
-                              border: "none",
-                              color: theme.colors.textMain,
-                              padding: "0.3rem 0.6rem",
-                              borderRadius: theme.radius.sm,
-                              fontSize: "0.8rem",
-                              cursor: "pointer",
-                            }}
-                            onClick={() => handleToggleEstado(u)}
-                          >
-                            {u.estado ? "Desactivar" : "Activar"}
-                          </button>
-                          {auth?.id_usuario !== u.id_usuario && (
-                            <DeleteButton onClick={() => handleEliminar(u)}>Eliminar</DeleteButton>
+                  usuariosFiltrados.map((u) => {
+                    const badge = getRolBadge(u.rol);
+                    const esElMismoUsuario = auth?.id_usuario === u.id_usuario;
+
+                    return (
+                      <TableRow key={u.id_usuario}>
+                        <TableCell>
+                          <strong>@{u.username}</strong>
+                          {esElMismoUsuario && (
+                            <span style={{
+                              marginLeft: "0.5rem",
+                              fontSize: "0.7rem",
+                              color: theme.colors.primary,
+                              fontWeight: 600,
+                            }}>
+                              (Tú)
+                            </span>
                           )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                        </TableCell>
+                        <TableCell>
+                          {u.persona
+                            ? `${u.persona.nombres || ""} ${u.persona.apellidos || ""}`.trim() || "-"
+                            : "-"}
+                        </TableCell>
+                        <TableCell>
+                          <span
+                            style={{
+                              padding: "0.25rem 0.6rem",
+                              borderRadius: theme.radius.sm,
+                              fontWeight: 700,
+                              fontSize: "0.78rem",
+                              background: badge.bg,
+                              color: badge.color,
+                            }}
+                          >
+                            {badge.label}
+                          </span>
+                        </TableCell>
+                        <TableCell>{u.persona?.ci || "-"}</TableCell>
+                        <TableCell>{u.persona?.telefono || "-"}</TableCell>
+                        <TableCell>
+                          <StatusBadge $status={u.estado ? "Activo" : "Inactivo"}>
+                            {u.estado ? "Activo" : "Inactivo"}
+                          </StatusBadge>
+                        </TableCell>
+                        <TableCell>
+                          <div style={{ display: "flex", gap: "0.4rem" }}>
+                            <button
+                              type="button"
+                              style={{
+                                background: "rgba(255, 255, 255, 0.08)",
+                                border: "none",
+                                color: theme.colors.textMain,
+                                padding: "0.35rem 0.65rem",
+                                borderRadius: theme.radius.sm,
+                                fontSize: "0.8rem",
+                                cursor: "pointer",
+                                transition: "all 0.2s ease",
+                              }}
+                              onClick={() => handleToggleEstado(u)}
+                            >
+                              {u.estado ? "Desactivar" : "Activar"}
+                            </button>
+                            {!esElMismoUsuario && (
+                              <DeleteButton onClick={() => setUsuarioAEliminar(u)}>
+                                Eliminar
+                              </DeleteButton>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </TableWrapper>
@@ -292,97 +424,134 @@ function UsuariosPage() {
       </ContentContainer>
 
       {/* Modal Crear Usuario */}
-      {modalAbierto && (
-        <ModalOverlay onClick={(e) => e.target === e.currentTarget && setModalAbierto(false)}>
-          <ModalCard>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.25rem" }}>
-              <h2 style={{ fontSize: "1.25rem", color: theme.colors.textMain }}>Registrar Operador Directivo</h2>
-              <button style={{ background: "none", border: "none", color: "#aaa", fontSize: "1.5rem", cursor: "pointer" }} onClick={() => setModalAbierto(false)}>×</button>
-            </div>
-            <form onSubmit={handleSubmit}>
-              <FormGrid>
-                <FormGroup>
-                  <Label>Nombres *</Label>
-                  <Input
-                    value={formData.nombres}
-                    onChange={(e) => setFormData({ ...formData, nombres: e.target.value })}
-                    required
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <Label>Apellidos *</Label>
-                  <Input
-                    value={formData.apellidos}
-                    onChange={(e) => setFormData({ ...formData, apellidos: e.target.value })}
-                    required
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <Label>Cédula de Identidad (CI)</Label>
-                  <Input
-                    value={formData.ci}
-                    onChange={(e) => setFormData({ ...formData, ci: e.target.value })}
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <Label>Teléfono de Contacto</Label>
-                  <Input
-                    value={formData.telefono}
-                    onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <Label>Nombre de Usuario *</Label>
-                  <Input
-                    value={formData.username}
-                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                    required
-                  />
-                </FormGroup>
-                <FormGroup>
-                  <Label>Contraseña de Acceso *</Label>
-                  <Input
-                    type="password"
-                    value={formData.password}
-                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                    required
-                  />
-                </FormGroup>
-                <FormGroup className="full">
-                  <Label>Cargo / Rol de Permisos *</Label>
-                  <Select
-                    value={formData.rol}
-                    onChange={(e) => setFormData({ ...formData, rol: e.target.value })}
-                  >
-                    <option value="PRESIDENTE">Presidente (Acceso Total + Usuarios)</option>
-                    <option value="SEC_HACIENDA">Secretaria de Hacienda (Caja, Ingresos, Luz, Egresos, Reportes)</option>
-                    <option value="SEC_NACIONAL">Secretaria Nacional (Eventos, Asistencias, Socios)</option>
-                  </Select>
-                </FormGroup>
-                <FormGroup className="full">
-                  <Label>Domicilio</Label>
-                  <Input
-                    value={formData.domicilio}
-                    onChange={(e) => setFormData({ ...formData, domicilio: e.target.value })}
-                  />
-                </FormGroup>
-              </FormGrid>
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem", marginTop: "1.5rem" }}>
-                <button
-                  type="button"
-                  style={{ background: "none", border: `1px solid ${theme.colors.border}`, color: "#aaa", padding: "0.6rem 1.2rem", borderRadius: theme.radius.md, cursor: "pointer" }}
-                  onClick={() => setModalAbierto(false)}
-                >
-                  Cancelar
-                </button>
-                <CreateButton type="submit" disabled={guardando}>
-                  {guardando ? "Creando..." : "Registrar Usuario"}
-                </CreateButton>
-              </div>
-            </form>
-          </ModalCard>
-        </ModalOverlay>
-      )}
+      <Modal
+        isOpen={modalAbierto}
+        onClose={() => setModalAbierto(false)}
+        title="Registrar Operador Directivo"
+        maxWidth="560px"
+      >
+        <form onSubmit={handleSubmit}>
+          <FormGrid>
+            <FormGroup>
+              <Label>Nombres *</Label>
+              <Input
+                value={formData.nombres}
+                $hasError={!!errors.nombres}
+                onChange={(e) => {
+                  setFormData({ ...formData, nombres: e.target.value });
+                  if (errors.nombres) setErrors((p) => ({ ...p, nombres: undefined }));
+                }}
+                placeholder="Ej. Juan"
+              />
+              {errors.nombres && <ErrorText>{errors.nombres}</ErrorText>}
+            </FormGroup>
+            <FormGroup>
+              <Label>Apellidos *</Label>
+              <Input
+                value={formData.apellidos}
+                $hasError={!!errors.apellidos}
+                onChange={(e) => {
+                  setFormData({ ...formData, apellidos: e.target.value });
+                  if (errors.apellidos) setErrors((p) => ({ ...p, apellidos: undefined }));
+                }}
+                placeholder="Ej. Pérez Quispe"
+              />
+              {errors.apellidos && <ErrorText>{errors.apellidos}</ErrorText>}
+            </FormGroup>
+            <FormGroup>
+              <Label>Cédula de Identidad (CI)</Label>
+              <Input
+                value={formData.ci}
+                $hasError={!!errors.ci}
+                onChange={(e) => {
+                  setFormData({ ...formData, ci: e.target.value });
+                  if (errors.ci) setErrors((p) => ({ ...p, ci: undefined }));
+                }}
+                placeholder="Ej. 6543210 LP"
+              />
+              {errors.ci && <ErrorText>{errors.ci}</ErrorText>}
+            </FormGroup>
+            <FormGroup>
+              <Label>Teléfono de Contacto</Label>
+              <Input
+                value={formData.telefono}
+                onChange={(e) => setFormData({ ...formData, telefono: e.target.value })}
+                placeholder="Ej. 70123456"
+              />
+            </FormGroup>
+            <FormGroup>
+              <Label>Nombre de Usuario *</Label>
+              <Input
+                value={formData.username}
+                $hasError={!!errors.username}
+                onChange={(e) => {
+                  setFormData({ ...formData, username: e.target.value });
+                  if (errors.username) setErrors((p) => ({ ...p, username: undefined }));
+                }}
+                placeholder="Ej. jperez"
+                autoComplete="new-username"
+              />
+              {errors.username && <ErrorText>{errors.username}</ErrorText>}
+            </FormGroup>
+            <FormGroup>
+              <Label>Contraseña de Acceso *</Label>
+              <Input
+                type="password"
+                value={formData.password}
+                $hasError={!!errors.password}
+                onChange={(e) => {
+                  setFormData({ ...formData, password: e.target.value });
+                  if (errors.password) setErrors((p) => ({ ...p, password: undefined }));
+                }}
+                placeholder="Mínimo 6 caracteres"
+                autoComplete="new-password"
+              />
+              {errors.password && <ErrorText>{errors.password}</ErrorText>}
+            </FormGroup>
+            <FormGroup className="full">
+              <Label>Cargo / Rol de Permisos *</Label>
+              <Select
+                value={formData.rol}
+                onChange={(e) => setFormData({ ...formData, rol: e.target.value })}
+              >
+                <option value="PRESIDENTE">Presidente (Acceso Total + Usuarios)</option>
+                <option value="SEC_HACIENDA">Secretaria de Hacienda (Caja, Ingresos, Luz, Egresos, Reportes)</option>
+                <option value="SEC_NACIONAL">Secretaria General / Nacional (Eventos, Asistencias, Socios)</option>
+                <option value="LECTURADOR">Lecturador (Toma de lecturas de luz y medidores)</option>
+                <option value="CAJERO">Cajero (Cobranzas en ventanilla)</option>
+              </Select>
+            </FormGroup>
+            <FormGroup className="full">
+              <Label>Domicilio</Label>
+              <Input
+                value={formData.domicilio}
+                onChange={(e) => setFormData({ ...formData, domicilio: e.target.value })}
+                placeholder="Dirección o puesto de referencia"
+              />
+            </FormGroup>
+          </FormGrid>
+          <FormActions>
+            <CancelButton type="button" onClick={() => { setModalAbierto(false); setErrors({}); }}>
+              Cancelar
+            </CancelButton>
+            <CreateButton type="submit" disabled={guardando}>
+              {guardando ? "Creando..." : "Registrar Usuario"}
+            </CreateButton>
+          </FormActions>
+        </form>
+      </Modal>
+
+      {/* Modal Confirmar Eliminación */}
+      <ConfirmModal
+        isOpen={Boolean(usuarioAEliminar)}
+        onClose={() => setUsuarioAEliminar(null)}
+        onConfirm={confirmarEliminacion}
+        title="¿Eliminar Operador?"
+        message={`¿Está seguro de eliminar al usuario @${usuarioAEliminar?.username}? Esta acción revocará de inmediato todos sus accesos al sistema.`}
+        confirmText="Eliminar Usuario"
+        isDanger={true}
+        loading={eliminando}
+      />
     </PageContainer>
   );
 }

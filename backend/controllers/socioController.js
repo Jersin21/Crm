@@ -1,4 +1,4 @@
-const { Socio, Persona, Asociacion, Cargo, ConceptoCobro } = require('../models');
+const { Socio, Persona, Asociacion, Cargo, ConceptoCobro, sequelize } = require('../models');
 
 /**
  * getSocios: listar socios filtrados por id_asociacion del JWT
@@ -71,6 +71,7 @@ const getSocio = async (req, res, next) => {
  * 1 persona sea propietaria de 1 o más casetas sin duplicar su identidad física.
  */
 const createSocio = async (req, res, next) => {
+  const t = await sequelize.transaction();
   try {
     const id_asociacion = req.user.id_asociacion;
     const { id_persona, nombres, apellidos, domicilio, telefono, ci, nro_caseta } = req.body;
@@ -79,17 +80,22 @@ const createSocio = async (req, res, next) => {
 
     if (id_persona) {
       // 1. Propietario existente seleccionado explícitamente
-      persona = await Persona.findByPk(id_persona);
-      if (!persona) return res.status(404).json({ mensaje: 'El propietario seleccionado no existe.' });
+      persona = await Persona.findByPk(id_persona, { transaction: t });
+      if (!persona) {
+        await t.rollback();
+        return res.status(404).json({ mensaje: 'El propietario seleccionado no existe.' });
+      }
     } else if (ci && String(ci).trim()) {
       // 2. Si se proporciona CI, verificar si la persona ya existe para reusar y vincular caseta
       persona = await Persona.findOne({
         where: { ci: String(ci).trim(), deleted_at: null },
+        transaction: t,
       });
     }
 
     if (!persona) {
       if (!nombres || !apellidos) {
+        await t.rollback();
         return res.status(400).json({ mensaje: 'Nombres y apellidos son requeridos para un nuevo socio.' });
       }
       persona = await Persona.create({
@@ -100,14 +106,14 @@ const createSocio = async (req, res, next) => {
         ci: ci ? String(ci).trim() : null,
         created_at: new Date(),
         updated_at: new Date(),
-      });
+      }, { transaction: t });
     } else {
       // Actualizar datos de contacto si cambiaron
       const updateData = {};
-      if (domicilio) updateData.domicilio = domicilio;
-      if (telefono) updateData.telefono = telefono;
+      if (domicilio !== undefined) updateData.domicilio = domicilio;
+      if (telefono !== undefined) updateData.telefono = telefono;
       if (Object.keys(updateData).length > 0) {
-        await persona.update(updateData);
+        await persona.update(updateData, { transaction: t });
       }
     }
 
@@ -119,12 +125,15 @@ const createSocio = async (req, res, next) => {
       estado_socio: 'Activo',
       created_at: new Date(),
       updated_at: new Date(),
-    });
+    }, { transaction: t });
 
     // Contar cuántas casetas tiene ahora esta persona en la asociación
     const totalCasetas = await Socio.count({
       where: { id_persona: persona.id_persona, id_asociacion, deleted_at: null },
+      transaction: t,
     });
+
+    await t.commit();
 
     return res.status(201).json({
       mensaje: totalCasetas > 1
@@ -137,6 +146,7 @@ const createSocio = async (req, res, next) => {
       },
     });
   } catch (error) {
+    await t.rollback();
     next(error);
   }
 };
@@ -157,10 +167,24 @@ const updateSocio = async (req, res, next) => {
 
     const { nombres, apellidos, domicilio, telefono, ci, nro_caseta, estado_socio } = req.body;
 
-    // Actualizar persona
-    await socio.persona.update({ nombres, apellidos, domicilio, telefono, ci, updated_at: new Date() });
+    // Actualizar persona de forma segura (sin sobreescribir con undefined)
+    const personaUpdates = { updated_at: new Date() };
+    if (nombres !== undefined) personaUpdates.nombres = nombres;
+    if (apellidos !== undefined) personaUpdates.apellidos = apellidos;
+    if (domicilio !== undefined) personaUpdates.domicilio = domicilio;
+    if (telefono !== undefined) personaUpdates.telefono = telefono;
+    if (ci !== undefined) personaUpdates.ci = ci;
+
+    if (socio.persona && Object.keys(personaUpdates).length > 1) {
+      await socio.persona.update(personaUpdates);
+    }
+
     // Actualizar socio
-    await socio.update({ nro_caseta, estado_socio, updated_at: new Date() });
+    const socioUpdates = { updated_at: new Date() };
+    if (nro_caseta !== undefined) socioUpdates.nro_caseta = nro_caseta;
+    if (estado_socio !== undefined) socioUpdates.estado_socio = estado_socio;
+
+    await socio.update(socioUpdates);
 
     return res.status(200).json({ mensaje: 'Socio actualizado correctamente.', socio });
   } catch (error) {
@@ -177,7 +201,7 @@ const deleteSocio = async (req, res, next) => {
     const id_asociacion = req.user.id_asociacion;
     const socio = await Socio.findOne({ where: { id_socio: id, id_asociacion, deleted_at: null } });
     if (!socio) return res.status(404).json({ mensaje: 'Socio no encontrado.' });
-    await socio.update({ deleted_at: new Date(), updated_at: new Date() });
+    await socio.destroy();
     return res.status(200).json({ mensaje: 'Socio eliminado correctamente.' });
   } catch (error) {
     next(error);
@@ -201,7 +225,7 @@ const getEstadoCuenta = async (req, res, next) => {
 
     // Obtener todos sus cargos pendientes o parciales
     const cargos = await Cargo.findAll({
-      where: { id_socio: id, deleted_at: null },
+      where: { id_socio: id, id_asociacion, deleted_at: null },
       include: [{ model: ConceptoCobro, as: 'concepto' }],
       order: [['fecha_vencimiento', 'ASC']],
     });

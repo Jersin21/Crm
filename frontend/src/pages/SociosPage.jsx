@@ -5,12 +5,14 @@ import { toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import { useNavigate } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { Tag, FileText, Edit, Trash2, UserPlus, Building, CheckCircle2, AlertCircle } from "lucide-react";
 import Sidebar from "../components/Sidebar";
 import useAuth from "../hooks/authHooks";
 import { useSocios, useDuenos } from "../hooks/useSocios";
 import useDebounce from "../hooks/useDebounce";
 import toastOptions from "../utils/toastOptions";
 import theme from "../styles/theme";
+import ConfirmModal from "../components/ConfirmModal";
 import {
   PageContainer,
   ContentContainer,
@@ -106,7 +108,7 @@ const Label = styled.label`
 const Input = styled.input`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -116,15 +118,15 @@ const Input = styled.input`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
-    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
+    box-shadow: 0 0 0 3px ${({ $hasError }) => ($hasError ? "rgba(239, 68, 68, 0.2)" : "rgba(14, 165, 233, 0.15)")};
   }
 `;
 
 const Select = styled.select`
   padding: 0.75rem 1rem;
   background-color: ${theme.colors.bgInput};
-  border: 1px solid ${theme.colors.border};
+  border: 1px solid ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.border)};
   border-radius: ${theme.radius.md};
   color: ${theme.colors.textMain};
   font-size: 0.875rem;
@@ -134,10 +136,17 @@ const Select = styled.select`
 
   &:focus {
     outline: none;
-    border-color: ${theme.colors.primary};
+    border-color: ${({ $hasError }) => ($hasError ? theme.colors.danger : theme.colors.primary)};
   }
 
   option { background-color: ${theme.colors.bgCard}; }
+`;
+
+const ErrorText = styled.span`
+  color: ${theme.colors.danger};
+  font-size: 0.75rem;
+  font-weight: 500;
+  margin-top: 0.15rem;
 `;
 
 const FormActions = styled.div`
@@ -189,7 +198,9 @@ const SocioRow = React.memo(function SocioRow({ socio, onNavigate, onEditar, onE
           <div style={{ marginTop: "0.25rem" }}>
             <span
               style={{
-                display: "inline-block",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "4px",
                 fontSize: "0.68rem",
                 fontWeight: 700,
                 backgroundColor: "rgba(14, 165, 233, 0.15)",
@@ -200,7 +211,7 @@ const SocioRow = React.memo(function SocioRow({ socio, onNavigate, onEditar, onE
               }}
               title={`El propietario posee ${socio.total_casetas_dueno} casetas: ${socio.todas_casetas?.join(", ")}`}
             >
-              🏷️ {socio.total_casetas_dueno} Casetas ({socio.todas_casetas?.join(", ")})
+              <Tag size={12} /> {socio.total_casetas_dueno} Casetas ({socio.todas_casetas?.join(", ")})
             </span>
           </div>
         )}
@@ -213,9 +224,16 @@ const SocioRow = React.memo(function SocioRow({ socio, onNavigate, onEditar, onE
         <StatusBadge $status={socio.estado_socio}>{socio.estado_socio}</StatusBadge>
       </TableCell>
       <TableCell>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <EditButton onClick={() => onEditar(socio)}>✏️ Editar</EditButton>
-          <DeleteButton onClick={() => onEliminar(socio)}>🗑️ Baja</DeleteButton>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+          <ViewButton onClick={() => onNavigate(`/socios/${socio.id_socio}/estado-cuenta`)} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+            <FileText size={13} /> Kardex
+          </ViewButton>
+          <EditButton onClick={() => onEditar(socio)} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+            <Edit size={13} /> Editar
+          </EditButton>
+          <DeleteButton onClick={() => onEliminar(socio)} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+            <Trash2 size={13} /> Baja
+          </DeleteButton>
         </div>
       </TableCell>
     </TableRow>
@@ -229,7 +247,7 @@ function SociosPage() {
   const navigate = useNavigate();
   // Consumo mediante TanStack Query v5 (Caché inteligente por 5 min, cero spam 429)
   const { socios, isLoading: loadingSocios, invalidateSocios } = useSocios();
-  const { duenos, isLoading: loadingDuenos, invalidateDuenos } = useDuenos();
+  const { duenos, isLoading: loadingDuenos, invalidateDuenos, refetch: refetchDuenos } = useDuenos();
   const loading = loadingSocios || loadingDuenos;
 
   const [esDuenoExistente, setEsDuenoExistente] = useState(false);
@@ -240,6 +258,8 @@ function SociosPage() {
   const [socioEditando, setSocioEditando] = useState(null);
   const [formData, setFormData] = useState(estadoInicial);
   const [guardando, setGuardando] = useState(false);
+  const [errors, setErrors] = useState({});
+  const [confirmDelete, setConfirmDelete] = useState({ isOpen: false, socio: null });
 
   // Memoización estratégica del filtro usando el valor con debounce
   const sociosFiltrados = useMemo(() => {
@@ -254,11 +274,36 @@ function SociosPage() {
     });
   }, [socios, debouncedBusqueda]);
 
+  const validateForm = () => {
+    const newErrors = {};
+    if (!formData.nro_caseta || !String(formData.nro_caseta).trim()) {
+      newErrors.nro_caseta = "El número de caseta es obligatorio";
+    }
+    if (!socioEditando && esDuenoExistente) {
+      if (!formData.id_persona) {
+        newErrors.id_persona = "Debe seleccionar un propietario registrado";
+      }
+    } else {
+      if (!formData.nombres || formData.nombres.trim().length < 2) {
+        newErrors.nombres = "El nombre es obligatorio (mínimo 2 caracteres)";
+      }
+      if (!formData.apellidos || formData.apellidos.trim().length < 2) {
+        newErrors.apellidos = "Los apellidos son obligatorios (mínimo 2 caracteres)";
+      }
+      if (formData.ci && formData.ci.trim().length > 0 && formData.ci.trim().length < 4) {
+        newErrors.ci = "El CI debe contener al menos 4 caracteres";
+      }
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const abrirCrear = () => {
     setSocioEditando(null);
     setEsDuenoExistente(false);
     setFormData(estadoInicial);
-    fetchDuenos();
+    setErrors({});
+    if (refetchDuenos) refetchDuenos();
     setModalAbierto(true);
   };
 
@@ -266,6 +311,7 @@ function SociosPage() {
     const p = socio.persona || socio.Persona || {};
     setSocioEditando(socio);
     setEsDuenoExistente(false);
+    setErrors({});
     setFormData({
       id_persona: p.id_persona || "",
       nro_caseta: socio.nro_caseta || "",
@@ -284,29 +330,22 @@ function SociosPage() {
     setSocioEditando(null);
     setEsDuenoExistente(false);
     setFormData(estadoInicial);
+    setErrors({});
   };
 
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+    if (errors[name]) {
+      setErrors((prev) => ({ ...prev, [name]: undefined }));
+    }
   };
 
   const handleGuardar = async (e) => {
     e.preventDefault();
-    if (!formData.nro_caseta) {
-      toast.error("El número de caseta es requerido", toastOptions);
+    if (!validateForm()) {
+      toast.error("Por favor completa los campos obligatorios correctamente", toastOptions);
       return;
-    }
-
-    if (!socioEditando && esDuenoExistente) {
-      if (!formData.id_persona) {
-        toast.error("Selecciona un propietario existente de la lista", toastOptions);
-        return;
-      }
-    } else {
-      if (!formData.nombres.trim() || !formData.apellidos.trim()) {
-        toast.error("Completa los nombres y apellidos requeridos", toastOptions);
-        return;
-      }
     }
 
     try {
@@ -335,22 +374,27 @@ function SociosPage() {
     }
   };
 
-  const handleEliminar = async (socio) => {
-    const p = socio.persona || socio.Persona || {};
-    if (!window.confirm(`¿Desactivar al socio ${p.nombres || ""} ${p.apellidos || ""}?`)) return;
+  const solicitarEliminar = (socio) => {
+    setConfirmDelete({ isOpen: true, socio });
+  };
+
+  const handleConfirmarEliminar = async () => {
+    if (!confirmDelete.socio) return;
     try {
-      await axios.delete(`${sociosRoute}/${socio.id_socio}`, auth.config);
+      await axios.delete(`${sociosRoute}/${confirmDelete.socio.id_socio}`, auth.config);
       toast.success("Socio desactivado correctamente", toastOptions);
       invalidateSocios();
       invalidateDuenos();
     } catch (err) {
       toast.error("Error al desactivar el socio", toastOptions);
+    } finally {
+      setConfirmDelete({ isOpen: false, socio: null });
     }
   };
 
   const handleNavigate = useCallback((path) => navigate(path), [navigate]);
   const handleAbrirEditar = useCallback((socio) => abrirEditar(socio), []);
-  const handleEliminarCallback = useCallback((socio) => handleEliminar(socio), []);
+  const handleEliminarCallback = useCallback((socio) => solicitarEliminar(socio), []);
 
   const parentRef = useRef(null);
   const rowVirtualizer = useVirtualizer({
@@ -368,6 +412,9 @@ function SociosPage() {
           <div className="titles">
             <h1>Socios y Padrón de Casetas</h1>
             <p>Padrón oficial de comerciantes activos. Las nuevas afiliaciones y traspasos se gestionan en Ingresos.</p>
+          </div>
+          <div className="actions">
+            <CreateButton onClick={abrirCrear}>+ Nuevo Socio</CreateButton>
           </div>
         </SectionHeader>
 
@@ -485,9 +532,13 @@ function SociosPage() {
                       background: !esDuenoExistente ? theme.colors.primary : "transparent",
                       color: !esDuenoExistente ? "#ffffff" : theme.colors.textMuted,
                       transition: "all 0.2s ease",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.4rem",
                     }}
                   >
-                    👤 Nuevo Propietario
+                    <UserPlus size={15} /> Nuevo Propietario
                   </button>
                   <button
                     type="button"
@@ -503,9 +554,13 @@ function SociosPage() {
                       background: esDuenoExistente ? theme.colors.primary : "transparent",
                       color: esDuenoExistente ? "#ffffff" : theme.colors.textMuted,
                       transition: "all 0.2s ease",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "0.4rem",
                     }}
                   >
-                    🏢 Asignar a Dueño Existente
+                    <Building size={15} /> Asignar a Dueño Existente
                   </button>
                 </div>
               )}
@@ -517,6 +572,7 @@ function SociosPage() {
                     <Select
                       name="id_persona"
                       value={formData.id_persona || ""}
+                      $hasError={!!errors.id_persona}
                       onChange={(e) => {
                         const idp = e.target.value;
                         const dueno = duenos.find((d) => String(d.id_persona) === String(idp));
@@ -529,8 +585,8 @@ function SociosPage() {
                           telefono: dueno?.telefono || "",
                           direccion: dueno?.domicilio || "",
                         }));
+                        if (errors.id_persona) setErrors((prev) => ({ ...prev, id_persona: undefined }));
                       }}
-                      required
                     >
                       <option value="">-- Seleccionar de los {duenos.length} propietarios registrados --</option>
                       {duenos.map((d) => (
@@ -539,6 +595,7 @@ function SociosPage() {
                         </option>
                       ))}
                     </Select>
+                    {errors.id_persona && <ErrorText>{errors.id_persona}</ErrorText>}
                   </FormGroup>
                 )}
 
@@ -555,8 +612,8 @@ function SociosPage() {
                       marginBottom: "0.5rem",
                     }}
                   >
-                    <div style={{ fontWeight: 700, color: theme.colors.primary, marginBottom: "0.25rem" }}>
-                      ✅ Propietario Seleccionado:
+                    <div style={{ fontWeight: 700, color: theme.colors.primary, marginBottom: "0.25rem", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                      <CheckCircle2 size={16} /> Propietario Seleccionado:
                     </div>
                     <div><strong>Nombre:</strong> {formData.nombres} {formData.apellidos}</div>
                     <div><strong>CI:</strong> {formData.ci || "S/D"} | <strong>Tel:</strong> {formData.telefono || "S/D"}</div>
@@ -574,8 +631,9 @@ function SociosPage() {
                     value={formData.nro_caseta}
                     onChange={handleChange}
                     placeholder="Ej. 12"
-                    required
+                    $hasError={!!errors.nro_caseta}
                   />
+                  {errors.nro_caseta && <ErrorText>{errors.nro_caseta}</ErrorText>}
                 </FormGroup>
                 <FormGroup>
                   <Label>Estado</Label>
@@ -590,15 +648,18 @@ function SociosPage() {
                   <>
                     <FormGroup>
                       <Label>Nombres *</Label>
-                      <Input name="nombres" value={formData.nombres} onChange={handleChange} required />
+                      <Input name="nombres" value={formData.nombres} onChange={handleChange} $hasError={!!errors.nombres} />
+                      {errors.nombres && <ErrorText>{errors.nombres}</ErrorText>}
                     </FormGroup>
                     <FormGroup>
                       <Label>Apellidos *</Label>
-                      <Input name="apellidos" value={formData.apellidos} onChange={handleChange} required />
+                      <Input name="apellidos" value={formData.apellidos} onChange={handleChange} $hasError={!!errors.apellidos} />
+                      {errors.apellidos && <ErrorText>{errors.apellidos}</ErrorText>}
                     </FormGroup>
                     <FormGroup>
                       <Label>CI</Label>
-                      <Input name="ci" value={formData.ci} onChange={handleChange} />
+                      <Input name="ci" value={formData.ci} onChange={handleChange} $hasError={!!errors.ci} />
+                      {errors.ci && <ErrorText>{errors.ci}</ErrorText>}
                     </FormGroup>
                     <FormGroup>
                       <Label>Teléfono</Label>
@@ -621,6 +682,16 @@ function SociosPage() {
           </ModalCard>
         </ModalOverlay>
       )}
+
+      <ConfirmModal
+        isOpen={confirmDelete.isOpen}
+        title="Confirmar Baja de Socio"
+        message={`¿Está seguro de dar de baja al socio de la Caseta #${confirmDelete.socio?.nro_caseta}? Esta acción cambiará su estado a Inactivo en el padrón.`}
+        confirmText="Dar de Baja"
+        confirmColor={theme.colors.danger}
+        onConfirm={handleConfirmarEliminar}
+        onCancel={() => setConfirmDelete({ isOpen: false, socio: null })}
+      />
     </PageContainer>
   );
 }

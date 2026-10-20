@@ -1,5 +1,17 @@
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
+
+const getJwtSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL: JWT_SECRET no está configurado en las variables de entorno para producción.');
+    }
+    return 'mercado_crm_secret_2024';
+  }
+  return secret;
+};
 
 /**
  * Genera un token JWT para autenticación del directivo
@@ -11,9 +23,18 @@ require('dotenv').config();
 const generateJWT = (id_usuario, rol, id_asociacion) => {
   return jwt.sign(
     { id_usuario, rol, id_asociacion },
-    process.env.JWT_SECRET || 'mercado_crm_secret_2024',
-    { expiresIn: '30d' }
+    getJwtSecret(),
+    { expiresIn: process.env.JWT_EXPIRES_IN || '30d' }
   );
 };
 
-module.exports = { generateJWT };
+/**
+ * Verifica y decodifica un token JWT
+ * @param {string} token
+ * @returns {object} Payload decodificado
+ */
+const verifyJWT = (token) => {
+  return jwt.verify(token, getJwtSecret());
+};
+
+module.exports = { generateJWT, verifyJWT, getJwtSecret };

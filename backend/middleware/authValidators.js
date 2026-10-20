@@ -71,7 +71,7 @@ const validateResetPassword = [
     .trim()
     .notEmpty().withMessage('El token de recuperación es obligatorio.')
     .isLength({ min: 10, max: 255 }).withMessage('Token de recuperación inválido.')
-    .escape(),
+    .matches(/^[a-fA-F0-9]+$/).withMessage('Token de recuperación con formato no válido.'),
   body('nueva_password')
     .optional()
     .isLength({ min: 6, max: 100 }).withMessage('La nueva contraseña debe tener al menos 6 caracteres.'),

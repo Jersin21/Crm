@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import styled from "styled-components";
+import { AlertTriangle } from "lucide-react";
 import theme from "../styles/theme";
 import Modal from "./Modal";
 
@@ -147,7 +148,7 @@ export function ConfirmModal({
 
       {isDanger && (
         <WarningBox>
-          <span>⚠️</span>
+          <AlertTriangle size={18} style={{ color: "#ef4444", flexShrink: 0 }} />
           <span>Esta acción es irreversible y afectará los registros contables.</span>
         </WarningBox>
       )}

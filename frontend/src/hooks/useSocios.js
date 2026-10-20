@@ -12,20 +12,21 @@ import useAuth from "./authHooks";
 export function useSocios() {
   const { auth } = useAuth();
   const queryClient = useQueryClient();
+  const idAsoc = auth?.id_asociacion || auth?.asociacion?.id_asociacion;
 
   const query = useQuery({
-    queryKey: ["socios", auth?.asociacion?.id_asociacion],
+    queryKey: ["socios", idAsoc],
     queryFn: async () => {
       const { data } = await axios.get(sociosRoute, auth.config);
       return Array.isArray(data) ? data : data.socios || [];
     },
-    enabled: !!auth?.token,
+    enabled: !!auth?.token && !!idAsoc,
     staleTime: 5 * 60 * 1000,
   });
 
   const invalidateSocios = () =>
     queryClient.invalidateQueries({
-      queryKey: ["socios", auth?.asociacion?.id_asociacion],
+      queryKey: ["socios", idAsoc],
     });
 
   return {
@@ -46,20 +47,21 @@ export function useSocios() {
 export function useDuenos() {
   const { auth } = useAuth();
   const queryClient = useQueryClient();
+  const idAsoc = auth?.id_asociacion || auth?.asociacion?.id_asociacion;
 
   const query = useQuery({
-    queryKey: ["duenos", auth?.asociacion?.id_asociacion],
+    queryKey: ["duenos", idAsoc],
     queryFn: async () => {
       const { data } = await axios.get(sociosDuenosRoute, auth.config);
       return data.duenos || [];
     },
-    enabled: !!auth?.token,
+    enabled: !!auth?.token && !!idAsoc,
     staleTime: 5 * 60 * 1000,
   });
 
   const invalidateDuenos = () =>
     queryClient.invalidateQueries({
-      queryKey: ["duenos", auth?.asociacion?.id_asociacion],
+      queryKey: ["duenos", idAsoc],
     });
 
   return {

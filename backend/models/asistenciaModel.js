@@ -44,6 +44,16 @@ const Asistencia = sequelize.define('asistencia', {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   deletedAt: 'deleted_at',
+  indexes: [
+    {
+      name: 'idx_asistencias_evento_socio',
+      fields: ['id_evento', 'id_socio'],
+    },
+    {
+      name: 'idx_asistencias_socio',
+      fields: ['id_socio'],
+    },
+  ],
 });
 
 module.exports = Asistencia;

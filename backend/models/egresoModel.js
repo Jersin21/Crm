@@ -54,6 +54,16 @@ const Egreso = sequelize.define('egreso', {
   createdAt: 'created_at',
   updatedAt: 'updated_at',
   deletedAt: 'deleted_at',
+  indexes: [
+    {
+      name: 'idx_egresos_asoc_fecha',
+      fields: ['id_asociacion', 'fecha_gasto'],
+    },
+    {
+      name: 'idx_egresos_tipo',
+      fields: ['id_tipo_egreso'],
+    },
+  ],
 });
 
 module.exports = Egreso;

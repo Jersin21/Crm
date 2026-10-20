@@ -1,15 +1,17 @@
-const { Evento, Asociacion, Asistencia, Socio, ConceptoCobro } = require('../models');
+const { Evento, Asociacion, Asistencia, Socio, ConceptoCobro, sequelize } = require('../models');
 
 /**
  * createEvento: crear evento y pre-crear asistencias para todos los socios activos
  * si el tipo es 'Evento_Cobro' o 'Asamblea'
  */
 const createEvento = async (req, res, next) => {
+  const t = await sequelize.transaction();
   try {
     const id_asociacion = req.user.id_asociacion;
     const { nombre_evento, tipo_evento, fecha, monto_aporte, monto_multa, descripcion, id_concepto } = req.body;
 
     if (!nombre_evento || !tipo_evento || !fecha) {
+      await t.rollback();
       return res.status(400).json({ mensaje: 'Nombre, tipo y fecha del evento son requeridos.' });
     }
 
@@ -41,6 +43,7 @@ const createEvento = async (req, res, next) => {
           created_at: new Date(),
           updated_at: new Date(),
         },
+        transaction: t,
       });
       conceptoId = conceptoAuto.id_concepto;
     }
@@ -54,8 +57,9 @@ const createEvento = async (req, res, next) => {
       monto_multa: monto_multa ? parseFloat(monto_multa) : null,
       descripcion,
       id_concepto: conceptoId,
-      created_at: new Date(), updated_at: new Date(),
-    });
+      created_at: new Date(),
+      updated_at: new Date(),
+    }, { transaction: t });
 
     let asistenciasCreadas = 0;
 
@@ -63,24 +67,29 @@ const createEvento = async (req, res, next) => {
     if (['Evento_Cobro', 'Asamblea', 'Reunion', 'Marcha'].includes(tipo_evento)) {
       const socios = await Socio.findAll({
         where: { id_asociacion, estado_socio: 'Activo', deleted_at: null },
+        transaction: t,
       });
 
       const registrosAsistencia = socios.map(s => ({
         id_evento: evento.id_evento,
         id_socio: s.id_socio,
         estado_asistencia: 'Falta', // Por defecto todos son 'Falta' hasta que se registre
-        created_at: new Date(), updated_at: new Date(),
+        created_at: new Date(),
+        updated_at: new Date(),
       }));
 
-      await Asistencia.bulkCreate(registrosAsistencia);
+      await Asistencia.bulkCreate(registrosAsistencia, { transaction: t });
       asistenciasCreadas = registrosAsistencia.length;
     }
+
+    await t.commit();
 
     return res.status(201).json({
       mensaje: `Evento creado. Se generaron ${asistenciasCreadas} registros de asistencia.`,
       evento,
     });
   } catch (error) {
+    await t.rollback();
     next(error);
   }
 };
@@ -169,8 +178,8 @@ const deleteEvento = async (req, res, next) => {
     const id_asociacion = req.user.id_asociacion;
     const evento = await Evento.findOne({ where: { id_evento: id, id_asociacion, deleted_at: null } });
     if (!evento) return res.status(404).json({ mensaje: 'Evento no encontrado.' });
-    await evento.update({ deleted_at: new Date(), updated_at: new Date() });
-    return res.status(200).json({ mensaje: 'Evento eliminado.' });
+    await evento.destroy();
+    return res.status(200).json({ mensaje: 'Evento eliminado correctamente.' });
   } catch (error) {
     next(error);
   }

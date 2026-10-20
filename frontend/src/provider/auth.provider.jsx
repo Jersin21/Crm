@@ -79,7 +79,9 @@ const AuthProvider = ({ children }) => {
           });
         }
       } catch (error) {
-        console.error("Error al validar token de sesión:", error);
+        if (import.meta.env?.DEV) {
+          console.error("Error al validar token de sesión:", error);
+        }
         localStorage.removeItem("token");
         setAuth({});
       } finally {
